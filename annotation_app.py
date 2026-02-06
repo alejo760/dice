@@ -628,9 +628,13 @@ def main():
         # ONE canvas per image — all sites draw here.
         logger.info(f"Rendering canvas: {canvas_w}x{canvas_h}, image shape: {img_for_canvas.shape}, dtype: {img_for_canvas.dtype}, min: {img_for_canvas.min()}, max: {img_for_canvas.max()}")
         try:
-            # Ensure image is uint8 and convert to PIL properly
+            # Convert numpy array to PIL Image and ensure it's in the right format
             img_uint8 = img_for_canvas.astype(np.uint8)
-            pil_image = Image.fromarray(img_uint8, mode='RGB')
+            pil_image = Image.fromarray(img_uint8)
+            
+            # Convert to RGBA to ensure compatibility
+            if pil_image.mode != 'RGBA':
+                pil_image = pil_image.convert('RGBA')
             
             # Use simpler key - only change when image changes
             canvas_key = f"canvas_{current_image['image_name']}"
