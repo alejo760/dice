@@ -458,14 +458,8 @@ def main():
     img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
     canvas_h, canvas_w = img_scaled.shape[:2]
     
-    # Convert to PIL and then to base64 for canvas background
+    # Convert to PIL for canvas
     pil_image = Image.fromarray(img_scaled.astype(np.uint8))
-    
-    # Convert PIL image to base64 string for CSS background
-    import base64
-    buffered = io.BytesIO()
-    pil_image.save(buffered, format="PNG")
-    img_base64 = base64.b64encode(buffered.getvalue()).decode()
 
     st.subheader(
         f"Paciente {current_image['patient_id']} — "
@@ -474,22 +468,8 @@ def main():
 
     col_canvas, col_meta = st.columns([3, 1])
 
-    # ── Canvas with image as CSS background ────────────────────────
+    # ── Canvas with image background ───────────────────────────────
     with col_canvas:
-        # Inject CSS to set the canvas background image
-        st.markdown(
-            f"""
-            <style>
-            canvas[id^="canvas"] {{
-                background-image: url("data:image/png;base64,{img_base64}") !important;
-                background-size: cover !important;
-                background-repeat: no-repeat !important;
-            }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-        
         # How many consolidation sites exist?
         state_key_preview = (
             f"consol_{current_image['patient_id']}_"
@@ -500,9 +480,6 @@ def main():
             n_sites = max(1, len(st.session_state[state_key_preview]))
 
         # ── Site picker (controls stroke colour only) ──────────────
-        # Always render the selectbox (even with 1 site) so
-        # that the widget tree structure stays stable and the
-        # canvas below never gets remounted / loses drawings.
         if "active_site" not in st.session_state:
             st.session_state.active_site = 0
 
@@ -540,14 +517,14 @@ def main():
             unsafe_allow_html=True,
         )
 
-        st.write(f"**🎨 Dibujando con color {active_label}**")
+        st.write(f"**🎨 Dibujando con color {active_label}** - Dibuje directamente sobre la imagen")
 
-        # Canvas for drawing - use dark background, image shown above
+        # Canvas with PIL image as background
         canvas_result = st_canvas(
             fill_color=fill_rgba,
             stroke_width=stroke_width,
             stroke_color=active_hex,
-            background_color="#1a1a1a",
+            background_image=pil_image,
             update_streamlit=True,
             height=canvas_h,
             width=canvas_w,
