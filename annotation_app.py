@@ -18,9 +18,18 @@ from pathlib import Path
 import json
 import io
 import zipfile
+import logging
+import os
 from datetime import datetime
 from streamlit_drawable_canvas import st_canvas
 import hashlib
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # AUTHENTICATION
@@ -166,29 +175,49 @@ def scale_image_preserve_ratio(img, target_width=900):
 
 def get_all_patient_images(base_path):
     """Scan patient folders and collect all JPG/PNG images with annotation status."""
-    base = Path(base_path)
+    base = Path(base_path).resolve()  # Use absolute path for reliable comparison
     patient_images = []
+    
+    logger.info(f"get_all_patient_images called with: {base_path}")
+    logger.info(f"Resolved base path: {base}")
+    
     if not base.exists():
+        logger.warning(f"Base path does not exist: {base}")
         return patient_images
 
     # Get all subdirectories (including 'uploads' folder for cloud mode)
-    folders = [base] + [f for f in base.iterdir() if f.is_dir()]
+    try:
+        subdirs = [f for f in base.iterdir() if f.is_dir()]
+        logger.info(f"Found {len(subdirs)} subdirectories: {[d.name for d in subdirs]}")
+    except Exception as e:
+        logger.error(f"Error listing subdirectories: {e}")
+        subdirs = []
+    
+    folders = [base] + subdirs
     
     for folder in folders:
-        img_files = sorted(
-            list(folder.glob("*.jpg")) + 
-            list(folder.glob("*.JPG")) +
-            list(folder.glob("*.jpeg")) +
-            list(folder.glob("*.png"))
-        )
+        logger.info(f"Scanning folder: {folder}")
+        # Collect all image extensions (case-insensitive approach)
+        img_files = []
+        for ext in ["*.jpg", "*.JPG", "*.jpeg", "*.JPEG", "*.png", "*.PNG"]:
+            found = list(folder.glob(ext))
+            logger.info(f"  Pattern {ext}: found {len(found)} files")
+            img_files.extend(found)
+        
+        img_files = sorted(set(img_files))  # Remove duplicates and sort
+        logger.info(f"  Total images in {folder.name}: {len(img_files)}")
+        
         for img in img_files:
             # Skip mask files
             if "_mask" in img.name:
+                logger.info(f"  Skipping mask file: {img.name}")
                 continue
             mask_path = img.parent / f"{img.stem}_mask.png"
             meta_path = img.parent / f"{img.stem}_annotation.json"
             # Use folder name as patient_id, or 'uploaded' for root
-            patient_id = folder.name if folder != base else "uploaded"
+            is_base_folder = folder.resolve() == base
+            patient_id = "uploaded" if is_base_folder else folder.name
+            logger.info(f"  Adding image: {img.name}, patient_id: {patient_id}")
             patient_images.append({
                 "patient_id": patient_id,
                 "image_path": img,
@@ -197,6 +226,8 @@ def get_all_patient_images(base_path):
                 "metadata_path": meta_path,
                 "annotated": mask_path.exists(),
             })
+    
+    logger.info(f"Total patient images found: {len(patient_images)}")
     return patient_images
 
 
@@ -276,30 +307,73 @@ def main():
         help="Suba imágenes JPG/PNG de rayos X para anotar",
     )
     
-    # Create upload directory
-    upload_dir = Path("./uploaded_images")
-    upload_dir.mkdir(parents=True, exist_ok=True)
+    # Create upload directory with absolute path for reliability
+    upload_dir = Path("./uploaded_images").resolve()
+    try:
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Upload directory: {upload_dir}")
+        logger.info(f"Upload directory exists: {upload_dir.exists()}")
+        logger.info(f"Upload directory is writable: {os.access(upload_dir, os.W_OK)}")
+    except Exception as e:
+        logger.error(f"Failed to create upload directory: {e}")
+        st.error(f"Error creating upload directory: {e}")
     
     # Track uploaded files to avoid infinite rerun loop
     if uploaded_files:
+        logger.info(f"Received {len(uploaded_files)} files from uploader")
         new_files_uploaded = False
         for uf in uploaded_files:
             file_path = upload_dir / uf.name
+            logger.info(f"Processing file: {uf.name} -> {file_path}")
             # Only write if file doesn't exist yet
             if not file_path.exists():
-                with open(file_path, "wb") as f:
-                    f.write(uf.getbuffer())
-                new_files_uploaded = True
+                try:
+                    file_content = uf.getbuffer()
+                    logger.info(f"File buffer size: {len(file_content)} bytes")
+                    with open(file_path, "wb") as f:
+                        f.write(file_content)
+                    logger.info(f"Saved new file: {file_path}")
+                    # Verify file was written
+                    if file_path.exists():
+                        logger.info(f"Verified file exists: {file_path}, size: {file_path.stat().st_size}")
+                        new_files_uploaded = True
+                    else:
+                        logger.error(f"File was not saved: {file_path}")
+                except Exception as e:
+                    logger.error(f"Error saving file {uf.name}: {e}")
+                    st.sidebar.error(f"Error saving {uf.name}: {e}")
+            else:
+                logger.info(f"File already exists: {file_path}")
         
         if new_files_uploaded:
             st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
+            logger.info("Triggering rerun after new file upload")
             st.rerun()  # Refresh to load the new images
     
     st.sidebar.divider()
 
     # ── Load images ────────────────────────────────────────────────────
-    patients_path = "./uploaded_images"
+    # Use same absolute path as upload_dir for consistency
+    patients_path = str(upload_dir)
+    
+    # Debug: List contents of upload directory
+    logger.info(f"Scanning for images in: {patients_path}")
+    try:
+        if Path(patients_path).exists():
+            all_files = list(Path(patients_path).iterdir())
+            logger.info(f"Files in upload directory ({len(all_files)} total): {[f.name for f in all_files]}")
+            # Show file types
+            for f in all_files:
+                logger.info(f"  File: {f.name}, is_file: {f.is_file()}, suffix: {f.suffix}")
+        else:
+            logger.warning(f"Upload directory does not exist: {patients_path}")
+    except Exception as e:
+        logger.error(f"Error listing upload directory: {e}")
+    
     patient_images = get_all_patient_images(patients_path)
+    logger.info(f"Found {len(patient_images)} patient images")
+    for img in patient_images:
+        logger.info(f"  - {img['image_name']} (annotated: {img['annotated']})")
 
     if not patient_images:
         st.info(
