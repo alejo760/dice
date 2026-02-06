@@ -18,14 +18,18 @@ from pathlib import Path
 import json
 import io
 import zipfile
-import os
 import logging
+import os
+import shutil
 from datetime import datetime
 from streamlit_drawable_canvas import st_canvas
 import hashlib
 
-# Minimal logging for debugging
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # ============================================================================
@@ -154,13 +158,10 @@ def calculate_precision_recall(ground_truth, prediction):
 
 def load_image_from_path(image_path):
     """Load image as RGB numpy array (original, no CLAHE)."""
-    try:
-        img = cv2.imread(str(image_path))
-        if img is None:
-            return None
-        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    except Exception:
+    img = cv2.imread(str(image_path))
+    if img is None:
         return None
+    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
 def scale_image_preserve_ratio(img, target_width=900):
@@ -175,35 +176,49 @@ def scale_image_preserve_ratio(img, target_width=900):
 
 def get_all_patient_images(base_path):
     """Scan patient folders and collect all JPG/PNG images with annotation status."""
-    base = Path(base_path).resolve()
+    base = Path(base_path).resolve()  # Use absolute path for reliable comparison
     patient_images = []
     
+    logger.info(f"get_all_patient_images called with: {base_path}")
+    logger.info(f"Resolved base path: {base}")
+    
     if not base.exists():
+        logger.warning(f"Base path does not exist: {base}")
         return patient_images
 
-    # Get all subdirectories
+    # Get all subdirectories (including 'uploads' folder for cloud mode)
     try:
         subdirs = [f for f in base.iterdir() if f.is_dir()]
-    except Exception:
+        logger.info(f"Found {len(subdirs)} subdirectories: {[d.name for d in subdirs]}")
+    except Exception as e:
+        logger.error(f"Error listing subdirectories: {e}")
         subdirs = []
     
     folders = [base] + subdirs
     
     for folder in folders:
-        # Collect all image extensions (case-insensitive)
+        logger.info(f"Scanning folder: {folder}")
+        # Collect all image extensions (case-insensitive approach)
         img_files = []
         for ext in ["*.jpg", "*.JPG", "*.jpeg", "*.JPEG", "*.png", "*.PNG"]:
-            img_files.extend(list(folder.glob(ext)))
+            found = list(folder.glob(ext))
+            logger.info(f"  Pattern {ext}: found {len(found)} files")
+            img_files.extend(found)
         
-        img_files = sorted(set(img_files))
+        img_files = sorted(set(img_files))  # Remove duplicates and sort
+        logger.info(f"  Total images in {folder.name}: {len(img_files)}")
         
         for img in img_files:
+            # Skip mask files
             if "_mask" in img.name:
+                logger.info(f"  Skipping mask file: {img.name}")
                 continue
             mask_path = img.parent / f"{img.stem}_mask.png"
             meta_path = img.parent / f"{img.stem}_annotation.json"
+            # Use folder name as patient_id, or 'uploaded' for root
             is_base_folder = folder.resolve() == base
             patient_id = "uploaded" if is_base_folder else folder.name
+            logger.info(f"  Adding image: {img.name}, patient_id: {patient_id}")
             patient_images.append({
                 "patient_id": patient_id,
                 "image_path": img,
@@ -213,6 +228,7 @@ def get_all_patient_images(base_path):
                 "annotated": mask_path.exists(),
             })
     
+    logger.info(f"Total patient images found: {len(patient_images)}")
     return patient_images
 
 
@@ -275,6 +291,31 @@ def main():
         layout="wide",
     )
 
+    # ── Clear uploaded images and cache on fresh session start ─────────
+    if "session_initialized" not in st.session_state:
+        st.session_state.session_initialized = True
+        
+        # Clear Streamlit cache
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        logger.info("Cleared Streamlit cache")
+        
+        # Clear uploaded images folder
+        upload_folder = Path("./uploaded_images")
+        if upload_folder.exists():
+            try:
+                import shutil
+                for item in upload_folder.iterdir():
+                    if item.is_file():
+                        item.unlink()
+                        logger.info(f"Deleted file: {item.name}")
+                    elif item.is_dir():
+                        shutil.rmtree(item)
+                        logger.info(f"Deleted folder: {item.name}")
+                logger.info("Cleared all uploaded images on session start")
+            except Exception as e:
+                logger.error(f"Error clearing uploaded images: {e}")
+
     st.title("🫁 Pneumonia Consolidation — Ground Truth Annotation")
     
     # Show logout button
@@ -292,57 +333,73 @@ def main():
         help="Suba imágenes JPG/PNG de rayos X para anotar",
     )
     
-    # Create upload directory
+    # Create upload directory with absolute path for reliability
     upload_dir = Path("./uploaded_images").resolve()
     try:
         upload_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Upload directory: {upload_dir}")
+        logger.info(f"Upload directory exists: {upload_dir.exists()}")
+        logger.info(f"Upload directory is writable: {os.access(upload_dir, os.W_OK)}")
     except Exception as e:
+        logger.error(f"Failed to create upload directory: {e}")
         st.error(f"Error creating upload directory: {e}")
     
-    # Clear upload directory if no files in uploader (user cleared or fresh session)
-    if not uploaded_files:
-        try:
-            for existing_file in upload_dir.iterdir():
-                if existing_file.is_file():
-                    existing_file.unlink()
-        except Exception:
-            pass
-    else:
-        # Handle uploaded files - clear previous images when new ones are uploaded
-        # Get names of currently uploaded files
-        uploaded_names = {uf.name for uf in uploaded_files}
-        
-        # Delete all existing files that are not in the current upload
-        try:
-            for existing_file in upload_dir.iterdir():
-                if existing_file.is_file() and existing_file.name not in uploaded_names:
-                    existing_file.unlink()
-        except Exception:
-            pass
-        
-        # Save new files
+    # Track uploaded files to avoid infinite rerun loop
+    if uploaded_files:
+        logger.info(f"Received {len(uploaded_files)} files from uploader")
         new_files_uploaded = False
         for uf in uploaded_files:
             file_path = upload_dir / uf.name
+            logger.info(f"Processing file: {uf.name} -> {file_path}")
+            # Only write if file doesn't exist yet
             if not file_path.exists():
                 try:
+                    file_content = uf.getbuffer()
+                    logger.info(f"File buffer size: {len(file_content)} bytes")
                     with open(file_path, "wb") as f:
-                        f.write(uf.getbuffer())
-                    new_files_uploaded = True
+                        f.write(file_content)
+                    logger.info(f"Saved new file: {file_path}")
+                    # Verify file was written
+                    if file_path.exists():
+                        logger.info(f"Verified file exists: {file_path}, size: {file_path.stat().st_size}")
+                        new_files_uploaded = True
+                    else:
+                        logger.error(f"File was not saved: {file_path}")
                 except Exception as e:
+                    logger.error(f"Error saving file {uf.name}: {e}")
                     st.sidebar.error(f"Error saving {uf.name}: {e}")
+            else:
+                logger.info(f"File already exists: {file_path}")
         
         if new_files_uploaded:
-            # Reset navigation state for new images
-            st.session_state.current_index = 0
             st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
-            st.rerun()
+            logger.info("Triggering rerun after new file upload")
+            st.rerun()  # Refresh to load the new images
     
     st.sidebar.divider()
 
     # ── Load images ────────────────────────────────────────────────────
+    # Use same absolute path as upload_dir for consistency
     patients_path = str(upload_dir)
+    
+    # Debug: List contents of upload directory
+    logger.info(f"Scanning for images in: {patients_path}")
+    try:
+        if Path(patients_path).exists():
+            all_files = list(Path(patients_path).iterdir())
+            logger.info(f"Files in upload directory ({len(all_files)} total): {[f.name for f in all_files]}")
+            # Show file types
+            for f in all_files:
+                logger.info(f"  File: {f.name}, is_file: {f.is_file()}, suffix: {f.suffix}")
+        else:
+            logger.warning(f"Upload directory does not exist: {patients_path}")
+    except Exception as e:
+        logger.error(f"Error listing upload directory: {e}")
+    
     patient_images = get_all_patient_images(patients_path)
+    logger.info(f"Found {len(patient_images)} patient images")
+    for img in patient_images:
+        logger.info(f"  - {img['image_name']} (annotated: {img['annotated']})")
 
     if not patient_images:
         st.info(
@@ -519,7 +576,7 @@ def main():
     
     st.divider()
 
-    # Load original image
+    # Load original image (NO CLAHE)
     img_rgb = load_image_from_path(current_image["image_path"])
     if img_rgb is None:
         st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
@@ -626,31 +683,22 @@ def main():
             )
 
         # ONE canvas per image — all sites draw here.
-        logger.info(f"Rendering canvas: {canvas_w}x{canvas_h}, image shape: {img_for_canvas.shape}, dtype: {img_for_canvas.dtype}, min: {img_for_canvas.min()}, max: {img_for_canvas.max()}")
-        try:
-            # Ensure image is uint8 and convert to PIL properly
-            img_uint8 = img_for_canvas.astype(np.uint8)
-            pil_image = Image.fromarray(img_uint8, mode='RGB')
-            
-            # Use simpler key - only change when image changes
-            canvas_key = f"canvas_{current_image['image_name']}"
-            
-            canvas_result = st_canvas(
-                fill_color=fill_rgba,
-                stroke_width=stroke_width,
-                stroke_color=active_hex,
-                background_image=pil_image,
-                update_streamlit=True,
-                height=canvas_h,
-                width=canvas_w,
-                drawing_mode=drawing_mode,
-                key=canvas_key,
-            )
-            logger.info("Canvas rendered successfully")
-        except Exception as e:
-            logger.error(f"Canvas render error: {e}")
-            st.error(f"Error rendering canvas: {e}")
-            canvas_result = None
+        # Only zoom/pan changes the key; switching active site
+        # just changes the stroke colour, keeping all drawings.
+        canvas_result = st_canvas(
+            fill_color=fill_rgba,
+            stroke_width=stroke_width,
+            stroke_color=active_hex,
+            background_image=Image.fromarray(img_for_canvas),
+            background_color="#000000",
+            update_streamlit=True,
+            height=canvas_h,
+            width=canvas_w,
+            drawing_mode=drawing_mode,
+            key=f"canvas_{current_image['patient_id']}_"
+                f"{current_image['image_name']}_z{zoom_level}_"
+                f"x{zoom_pan_x}_y{zoom_pan_y}",
+        )
 
         # --- Mouse-wheel zoom via JS injection ------------------
         import streamlit.components.v1 as components
@@ -774,8 +822,8 @@ def main():
                 st.session_state[state_key] = saved
             else:
                 st.session_state[state_key] = [
-                    {"location": "Right Lower Lobe",
-                     "type": "Solid Consolidation"}
+                    {"location": "Lóbulo Inferior Derecho",
+                     "type": "Consolidación Sólida"}
                 ]
 
         consolidations = st.session_state[state_key]
@@ -821,8 +869,8 @@ def main():
         if st.button("➕ Agregar Otro Sitio de Consolidación",
                      use_container_width=True):
             consolidations.append(
-                {"location": "Left Lower Lobe",
-                 "type": "Solid Consolidation"}
+                {"location": "Lóbulo Inferior Izquierdo",
+                 "type": "Consolidación Sólida"}
             )
             # Auto-switch to the new site so the next strokes
             # use the new colour immediately
