@@ -299,8 +299,16 @@ def main():
     except Exception as e:
         st.error(f"Error creating upload directory: {e}")
     
-    # Handle uploaded files - clear previous images when new ones are uploaded
-    if uploaded_files:
+    # Clear upload directory if no files in uploader (user cleared or fresh session)
+    if not uploaded_files:
+        try:
+            for existing_file in upload_dir.iterdir():
+                if existing_file.is_file():
+                    existing_file.unlink()
+        except Exception:
+            pass
+    else:
+        # Handle uploaded files - clear previous images when new ones are uploaded
         # Get names of currently uploaded files
         uploaded_names = {uf.name for uf in uploaded_files}
         
