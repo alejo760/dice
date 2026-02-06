@@ -627,23 +627,38 @@ def main():
 
         # ONE canvas per image — all sites draw here.
         logger.info(f"Rendering canvas: {canvas_w}x{canvas_h}, image shape: {img_for_canvas.shape}, dtype: {img_for_canvas.dtype}, min: {img_for_canvas.min()}, max: {img_for_canvas.max()}")
+        
+        # Display the image first, then overlay the canvas
+        st.image(img_for_canvas, use_container_width=False, width=canvas_w)
+        
         try:
-            # Convert numpy array to PIL Image and ensure it's in the right format
-            img_uint8 = img_for_canvas.astype(np.uint8)
-            pil_image = Image.fromarray(img_uint8)
-            
-            # Convert to RGBA to ensure compatibility
-            if pil_image.mode != 'RGBA':
-                pil_image = pil_image.convert('RGBA')
-            
             # Use simpler key - only change when image changes
             canvas_key = f"canvas_{current_image['image_name']}"
+            
+            # Inject CSS to overlay canvas on top of image
+            st.markdown(
+                f"""
+                <style>
+                    [data-testid="stImage"] {{
+                        position: relative;
+                        z-index: 1;
+                    }}
+                    iframe[title="streamlit_drawable_canvas.st_canvas"] {{
+                        position: relative;
+                        margin-top: -{canvas_h}px !important;
+                        z-index: 2;
+                        background: transparent !important;
+                    }}
+                </style>
+                """,
+                unsafe_allow_html=True,
+            )
             
             canvas_result = st_canvas(
                 fill_color=fill_rgba,
                 stroke_width=stroke_width,
                 stroke_color=active_hex,
-                background_image=pil_image,
+                background_color="rgba(0,0,0,0)",
                 update_streamlit=True,
                 height=canvas_h,
                 width=canvas_w,
