@@ -533,7 +533,7 @@ def main():
 
         st.write(f"**🎨 Dibujando con color {active_label}**")
 
-        # Canvas for drawing - use black background, image shown above
+        # Canvas for drawing - use dark background, image shown above
         canvas_result = st_canvas(
             fill_color=fill_rgba,
             stroke_width=stroke_width,
@@ -543,8 +543,15 @@ def main():
             height=canvas_h,
             width=canvas_w,
             drawing_mode=drawing_mode,
+            display_toolbar=True,
             key=f"canvas_{current_image['image_name']}",
         )
+        
+        # Debug info
+        if canvas_result.json_data is not None:
+            n_objects = len(canvas_result.json_data.get("objects", []))
+            if n_objects > 0:
+                st.success(f"✅ {n_objects} objeto(s) dibujado(s)")
 
     # ── Metadata column ───────────────────────────────────────────
     with col_meta:
