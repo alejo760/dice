@@ -280,13 +280,20 @@ def main():
     upload_dir = Path("./uploaded_images")
     upload_dir.mkdir(parents=True, exist_ok=True)
     
+    # Track uploaded files to avoid infinite rerun loop
     if uploaded_files:
+        new_files_uploaded = False
         for uf in uploaded_files:
             file_path = upload_dir / uf.name
-            with open(file_path, "wb") as f:
-                f.write(uf.getbuffer())
-        st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
-        st.rerun()  # Refresh to load the new images
+            # Only write if file doesn't exist yet
+            if not file_path.exists():
+                with open(file_path, "wb") as f:
+                    f.write(uf.getbuffer())
+                new_files_uploaded = True
+        
+        if new_files_uploaded:
+            st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
+            st.rerun()  # Refresh to load the new images
     
     st.sidebar.divider()
 
