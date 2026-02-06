@@ -632,19 +632,19 @@ def main():
             img_uint8 = img_for_canvas.astype(np.uint8)
             pil_image = Image.fromarray(img_uint8, mode='RGB')
             
+            # Use simpler key - only change when image changes
+            canvas_key = f"canvas_{current_image['image_name']}"
+            
             canvas_result = st_canvas(
                 fill_color=fill_rgba,
                 stroke_width=stroke_width,
                 stroke_color=active_hex,
                 background_image=pil_image,
-                background_color="#000000",
                 update_streamlit=True,
                 height=canvas_h,
                 width=canvas_w,
                 drawing_mode=drawing_mode,
-                key=f"canvas_{current_image['patient_id']}_"
-                    f"{current_image['image_name']}_z{zoom_level}_"
-                    f"x{zoom_pan_x}_y{zoom_pan_y}",
+                key=canvas_key,
             )
             logger.info("Canvas rendered successfully")
         except Exception as e:
