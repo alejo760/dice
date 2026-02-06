@@ -286,6 +286,7 @@ def main():
             with open(file_path, "wb") as f:
                 f.write(uf.getbuffer())
         st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
+        st.rerun()  # Refresh to load the new images
     
     st.sidebar.divider()
 
