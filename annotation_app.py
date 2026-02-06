@@ -461,7 +461,7 @@ def main():
     # Convert to PIL and then to base64 for canvas background
     pil_image = Image.fromarray(img_scaled.astype(np.uint8))
     
-    # Convert PIL image to base64 string for reliable background display
+    # Convert PIL image to base64 string for CSS background
     import base64
     buffered = io.BytesIO()
     pil_image.save(buffered, format="PNG")
@@ -474,12 +474,21 @@ def main():
 
     col_canvas, col_meta = st.columns([3, 1])
 
-    # ── Canvas with image background ───────────────────────────────
+    # ── Canvas with image as CSS background ────────────────────────
     with col_canvas:
-        # Display the X-ray image first
-        st.image(pil_image, caption="Radiografía de Tórax", width=canvas_w)
-        
-        st.markdown("**⬇️ Dibuje la consolidación en el lienzo negro debajo:**")
+        # Inject CSS to set the canvas background image
+        st.markdown(
+            f"""
+            <style>
+            canvas[id^="canvas"] {{
+                background-image: url("data:image/png;base64,{img_base64}") !important;
+                background-size: cover !important;
+                background-repeat: no-repeat !important;
+            }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
         
         # How many consolidation sites exist?
         state_key_preview = (
