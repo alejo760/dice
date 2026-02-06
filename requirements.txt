@@ -9,8 +9,8 @@ pandas>=2.0.0
 matplotlib>=3.7.0
 
 # Streamlit app
-streamlit>=1.32.0
-streamlit-drawable-canvas >=0.10.0
+streamlit>=1.32.0,<1.37.0
+streamlit-drawable-canvas==0.9.3
 
 # Optional: SAM (Segment Anything Model)
 # Uncomment to use SAM integration
