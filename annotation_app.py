@@ -448,7 +448,7 @@ def main():
     
     st.divider()
 
-    # Load original image (NO CLAHE)
+    # Load original image
     img_rgb = load_image_from_path(current_image["image_path"])
     if img_rgb is None:
         st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
@@ -456,17 +456,16 @@ def main():
 
     # Scale image to canvas_width preserving aspect ratio
     img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
-    img_for_canvas = img_scaled
+    canvas_h, canvas_w = img_scaled.shape[:2]
     
-    logger.info(f"Image loaded: shape={img_rgb.shape}, dtype={img_rgb.dtype}")
-    logger.info(f"Image scaled: shape={img_for_canvas.shape}, dtype={img_for_canvas.dtype}")
-
-    canvas_h, canvas_w = img_for_canvas.shape[:2]
-    logger.info(f"Canvas dimensions: {canvas_w}x{canvas_h}")
+    # Convert to PIL and then to base64 for canvas background
+    pil_image = Image.fromarray(img_scaled.astype(np.uint8))
     
-    # Convert to PIL Image for canvas
-    pil_image = Image.fromarray(img_for_canvas)
-    logger.info(f"PIL Image: mode={pil_image.mode}, size={pil_image.size}")
+    # Convert PIL image to base64 string for reliable background display
+    import base64
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="PNG")
+    img_base64 = base64.b64encode(buffered.getvalue()).decode()
 
     st.subheader(
         f"Paciente {current_image['patient_id']} — "
@@ -475,8 +474,13 @@ def main():
 
     col_canvas, col_meta = st.columns([3, 1])
 
-    # ── Canvas ─────────────────────────────────────────────────────
+    # ── Canvas with image background ───────────────────────────────
     with col_canvas:
+        # Display the X-ray image first
+        st.image(pil_image, caption="Radiografía de Tórax", use_container_width=False, width=canvas_w)
+        
+        st.markdown("**⬇️ Dibuje la consolidación en el lienzo negro debajo:**")
+        
         # How many consolidation sites exist?
         state_key_preview = (
             f"consol_{current_image['patient_id']}_"
@@ -529,19 +533,17 @@ def main():
 
         st.write(f"**🎨 Dibujando con color {active_label}**")
 
-        # ONE canvas per image — all sites draw here.
-        # Switching active site just changes the stroke colour, keeping all drawings.
+        # Canvas for drawing - use black background, image shown above
         canvas_result = st_canvas(
             fill_color=fill_rgba,
             stroke_width=stroke_width,
             stroke_color=active_hex,
-            background_image=pil_image,
-            background_color="#000000",
+            background_color="#1a1a1a",
             update_streamlit=True,
             height=canvas_h,
             width=canvas_w,
             drawing_mode=drawing_mode,
-            key=f"canvas_{current_image['patient_id']}_{current_image['image_name']}",
+            key=f"canvas_{current_image['image_name']}",
         )
 
     # ── Metadata column ───────────────────────────────────────────
