@@ -456,676 +456,481 @@ def main():
     zoom_pan_y = st.session_state.zoom_pan_y
     zoom_level = st.session_state.zoom_level
 
-    # ── Tabs ───────────────────────────────────────────────────────────
-    tab1, tab2, tab3 = st.tabs(["📋 Annotate", "🔄 Compare", "📖 Guidelines"])
+    # ── Image info ────────────────────────────────────────────────────
+    col_info1, col_info2 = st.columns([3, 1])
+    with col_info1:
+        st.info(f"**Imagen:** {current_image['image_name']}")
+    with col_info2:
+        if current_image["annotated"]:
+            st.success("✅ Anotada")
+        else:
+            st.warning("⏳ Pendiente")
+    
+    st.divider()
 
-    # ================================================================
-    # TAB 1 — ANNOTATE
-    # ================================================================
-    with tab1:
-        # Navigation bar
-        nav1, nav2, nav3, nav4, nav5 = st.columns([1, 1, 3, 1, 1])
+    # Load original image (NO CLAHE)
+    img_rgb = load_image_from_path(current_image["image_path"])
+    if img_rgb is None:
+        st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
+        return
 
-        with nav1:
-            if st.button("⬅️ Anterior", use_container_width=True):
-                if st.session_state.current_index > 0:
-                    st.session_state.current_index -= 1
-                    st.rerun()
-        with nav2:
-            if st.button("Siguiente ➡️", use_container_width=True):
-                if st.session_state.current_index < len(filtered_images) - 1:
-                    st.session_state.current_index += 1
-                    st.rerun()
-        with nav3:
-            st.info(
-                f"Imagen **{st.session_state.current_index + 1}** de "
-                f"**{len(filtered_images)}** · Paciente "
-                f"**{current_image['patient_id']}**"
+    # Scale image to canvas_width preserving aspect ratio
+    img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
+
+    # Apply zoom: crop a region of the scaled image and enlarge it
+    if zoom_level > 1.0:
+        zh, zw = img_scaled.shape[:2]
+        crop_h = int(zh / zoom_level)
+        crop_w = int(zw / zoom_level)
+        # Calculate crop origin from pan sliders
+        max_y = zh - crop_h
+        max_x = zw - crop_w
+        start_y = int(zoom_pan_y * max_y)
+        start_x = int(zoom_pan_x * max_x)
+        img_cropped = img_scaled[
+            start_y : start_y + crop_h,
+            start_x : start_x + crop_w,
+        ]
+        # Resize cropped region back to canvas dimensions
+        img_for_canvas = cv2.resize(
+            img_cropped, (zw, zh), interpolation=cv2.INTER_LINEAR
+        )
+    else:
+        img_for_canvas = img_scaled
+        start_x, start_y, crop_w, crop_h = (
+            0, 0, img_scaled.shape[1], img_scaled.shape[0]
+        )
+
+    canvas_h, canvas_w = img_for_canvas.shape[:2]
+
+    st.subheader(
+        f"Paciente {current_image['patient_id']} — "
+        f"{current_image['image_name']}"
+    )
+
+    col_canvas, col_meta = st.columns([3, 1])
+
+    # ── Canvas ─────────────────────────────────────────────────────
+    with col_canvas:
+        # How many consolidation sites exist?
+        state_key_preview = (
+            f"consol_{current_image['patient_id']}_"
+            f"{current_image['image_name']}"
+        )
+        n_sites = 1
+        if state_key_preview in st.session_state:
+            n_sites = max(1, len(st.session_state[state_key_preview]))
+
+        # ── Site picker (controls stroke colour only) ──────────────
+        # Always render the selectbox (even with 1 site) so
+        # that the widget tree structure stays stable and the
+        # canvas below never gets remounted / loses drawings.
+        if "active_site" not in st.session_state:
+            st.session_state.active_site = 0
+
+        active_site = st.selectbox(
+            "🫁 Sitio de Consolidación Activo (elija color para dibujar)",
+            list(range(n_sites)),
+            format_func=lambda i: (
+                f"Sitio {i + 1} — {get_color_for_index(i)[1]}"
+            ),
+            index=min(
+                st.session_state.active_site, n_sites - 1
+            ),
+            key="site_picker",
+        )
+        st.session_state.active_site = active_site
+
+        # Active site colour
+        active_hex, active_label = get_color_for_index(active_site)
+        r_c = int(active_hex[1:3], 16)
+        g_c = int(active_hex[3:5], 16)
+        b_c = int(active_hex[5:7], 16)
+        fill_rgba = f"rgba({r_c}, {g_c}, {b_c}, 0.3)"
+
+        # Build colour legend
+        color_legend_parts = []
+        for ci in range(n_sites):
+            hex_c, label = get_color_for_index(ci)
+            marker = "▶" if ci == active_site else "⬤"
+            color_legend_parts.append(
+                f'<span style="color:{hex_c};font-weight:bold;">'
+                f'{marker} Sitio {ci + 1}</span>'
             )
-        with nav4:
-            jump_to = st.number_input(
-                "Ir a #",
-                min_value=1,
-                max_value=len(filtered_images),
-                value=st.session_state.current_index + 1,
-                key="jump",
+        st.markdown(
+            " &nbsp; ".join(color_legend_parts),
+            unsafe_allow_html=True,
+        )
+
+        if zoom_level > 1.0:
+            st.write(
+                f"**🎨 Dibujando con color {active_label}** "
+                f"(🔍 {zoom_level:.1f}x — Desplace ↕ para zoom, "
+                f"use botones de flecha para desplazar)"
             )
-            if jump_to - 1 != st.session_state.current_index:
-                st.session_state.current_index = jump_to - 1
-                st.rerun()
-        with nav5:
-            if current_image["annotated"]:
-                st.success("✅ Hecho")
+        else:
+            st.write(
+                f"**🎨 Dibujando con color {active_label}** "
+                f"(Desplace ↕ sobre la imagen para zoom)"
+            )
+
+        # ONE canvas per image — all sites draw here.
+        # Only zoom/pan changes the key; switching active site
+        # just changes the stroke colour, keeping all drawings.
+        canvas_result = st_canvas(
+            fill_color=fill_rgba,
+            stroke_width=stroke_width,
+            stroke_color=active_hex,
+            background_image=Image.fromarray(img_for_canvas),
+            background_color="#000000",
+            update_streamlit=True,
+            height=canvas_h,
+            width=canvas_w,
+            drawing_mode=drawing_mode,
+            key=f"canvas_{current_image['patient_id']}_"
+                f"{current_image['image_name']}_z{zoom_level}_"
+                f"x{zoom_pan_x}_y{zoom_pan_y}",
+        )
+
+        # --- Mouse-wheel zoom via JS injection ------------------
+        import streamlit.components.v1 as components
+        components.html(
+            """
+            <script>
+            (function() {
+                // Find the Streamlit canvas elements
+                const doc = window.parent.document;
+                const canvases = doc.querySelectorAll(
+                    'canvas[id*="canvas"]'
+                );
+                // Also listen on the overall app container
+                const appContainer = doc.querySelector(
+                    '[data-testid="stAppViewContainer"]'
+                ) || doc.body;
+
+                function handleWheel(e) {
+                    // Only act when scrolling over the canvas area
+                    const target = e.target;
+                    const isCanvas = (
+                        target.tagName === 'CANVAS' ||
+                        target.closest('.stCanvasContainer') ||
+                        target.closest('[data-testid="stImage"]')
+                    );
+                    if (!isCanvas) return;
+
+                    e.preventDefault();
+                    e.stopPropagation();
+
+                    // deltaY > 0 = scroll down = zoom out
+                    const direction = e.deltaY > 0 ? 'out' : 'in';
+
+                    // Find the zoom +/- buttons
+                    const buttons = doc.querySelectorAll('button');
+                    let targetBtn = null;
+                    for (const btn of buttons) {
+                        const txt = btn.textContent.trim();
+                        if (direction === 'in' && txt === '➕') {
+                            targetBtn = btn;
+                            break;
+                        }
+                        if (direction === 'out' && txt === '➖') {
+                            targetBtn = btn;
+                            break;
+                        }
+                    }
+                    if (targetBtn) {
+                        targetBtn.click();
+                    }
+                }
+
+                // Attach with capture to intercept before scroll
+                appContainer.addEventListener(
+                    'wheel', handleWheel, {passive: false, capture: true}
+                );
+            })();
+            </script>
+            """,
+            height=0,
+        )
+
+        # Show thumbnail with zoom rectangle when zoomed in
+        if zoom_level > 1.0:
+            st.caption("📍 Vista general — el recuadro rojo muestra la región de zoom actual")
+            thumb_w = 250
+            thumb, _ = scale_image_preserve_ratio(img_scaled, thumb_w)
+            thumb_h_actual = thumb.shape[0]
+            # Draw rectangle on thumbnail showing zoomed area
+            th_ratio = thumb_w / img_scaled.shape[1]
+            rx1 = int(start_x * th_ratio)
+            ry1 = int(start_y * th_ratio)
+            rx2 = int((start_x + crop_w) * th_ratio)
+            ry2 = int((start_y + crop_h) * th_ratio)
+            thumb_copy = thumb.copy()
+            cv2.rectangle(thumb_copy, (rx1, ry1), (rx2, ry2),
+                          (255, 0, 0), 2)
+            st.image(thumb_copy, width=thumb_w)
+
+    # ── Metadata column ───────────────────────────────────────────
+    with col_meta:
+        st.write("**📝 Metadatos de Anotación**")
+
+        # Load existing metadata if any
+        existing_metadata = {}
+        if current_image["metadata_path"].exists():
+            try:
+                with open(current_image["metadata_path"], "r") as f:
+                    existing_metadata = json.load(f)
+            except Exception:
+                pass
+
+        # ── Multilobar consolidations ──────────────────────────────
+        st.write("**🫁 Consolidation Sites**")
+
+        location_options = [
+            "Right Upper Lobe",
+            "Right Middle Lobe",
+            "Right Lower Lobe",
+            "Left Upper Lobe",
+            "Left Lower Lobe",
+            "Lingula",
+        ]
+        type_options = [
+            "Solid Consolidation",
+            "Ground Glass Opacity",
+            "Air Bronchograms",
+            "Pleural Effusion",
+            "Mixed",
+        ]
+
+        # Initialise session-state list for consolidations
+        state_key = (
+            f"consol_{current_image['patient_id']}_"
+            f"{current_image['image_name']}"
+        )
+        if state_key not in st.session_state:
+            # Pre-fill from existing metadata
+            saved = existing_metadata.get("consolidations", [])
+            if saved:
+                st.session_state[state_key] = saved
             else:
-                st.warning("⏳ Pendiente")
+                st.session_state[state_key] = [
+                    {"location": "Lóbulo Inferior Derecho",
+                     "type": "Consolidación Sólida"}
+                ]
+
+        consolidations = st.session_state[state_key]
+
+        # Render each consolidation entry
+        for idx, entry in enumerate(consolidations):
+            site_hex, site_label = get_color_for_index(idx)
+            with st.expander(
+                f"⬤ Sitio {idx + 1}: {entry['location']}  "
+                f"({site_label})",
+                expanded=True,
+            ):
+                loc = st.selectbox(
+                    "Ubicación",
+                    location_options,
+                    index=(
+                        location_options.index(entry["location"])
+                        if entry["location"] in location_options
+                        else 0
+                    ),
+                    key=f"loc_{state_key}_{idx}",
+                )
+                ctype = st.selectbox(
+                    "Tipo",
+                    type_options,
+                    index=(
+                        type_options.index(entry["type"])
+                        if entry["type"] in type_options
+                        else 0
+                    ),
+                    key=f"type_{state_key}_{idx}",
+                )
+                consolidations[idx] = {"location": loc, "type": ctype}
+
+                if len(consolidations) > 1:
+                    if st.button(
+                        "🗑️ Eliminar", key=f"rm_{state_key}_{idx}",
+                        use_container_width=True,
+                    ):
+                        consolidations.pop(idx)
+                        st.rerun()
+
+        if st.button("➕ Agregar Otro Sitio de Consolidación",
+                     use_container_width=True):
+            consolidations.append(
+                {"location": "Lóbulo Inferior Izquierdo",
+                 "type": "Consolidación Sólida"}
+            )
+            # Auto-switch to the new site so the next strokes
+            # use the new colour immediately
+            st.session_state.active_site = len(consolidations) - 1
+            st.rerun()
 
         st.divider()
 
-        # Load original image (NO CLAHE)
-        img_rgb = load_image_from_path(current_image["image_path"])
-        if img_rgb is None:
-            st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
-            return
-
-        # Scale image to canvas_width preserving aspect ratio
-        img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
-
-        # Apply zoom: crop a region of the scaled image and enlarge it
-        if zoom_level > 1.0:
-            zh, zw = img_scaled.shape[:2]
-            crop_h = int(zh / zoom_level)
-            crop_w = int(zw / zoom_level)
-            # Calculate crop origin from pan sliders
-            max_y = zh - crop_h
-            max_x = zw - crop_w
-            start_y = int(zoom_pan_y * max_y)
-            start_x = int(zoom_pan_x * max_x)
-            img_cropped = img_scaled[
-                start_y : start_y + crop_h,
-                start_x : start_x + crop_w,
-            ]
-            # Resize cropped region back to canvas dimensions
-            img_for_canvas = cv2.resize(
-                img_cropped, (zw, zh), interpolation=cv2.INTER_LINEAR
+        # Pattern summary
+        involved_lobes = list({c["location"] for c in consolidations})
+        if len(involved_lobes) >= 2:
+            st.info(
+                f"🔴 Neumonía **Multilobar** — "
+                f"{len(involved_lobes)} lóbulos afectados"
             )
         else:
-            img_for_canvas = img_scaled
-            start_x, start_y, crop_w, crop_h = (
-                0, 0, img_scaled.shape[1], img_scaled.shape[0]
-            )
+            st.info(f"🟡 **Unilobar** — {involved_lobes[0]}")
 
-        canvas_h, canvas_w = img_for_canvas.shape[:2]
-
-        st.subheader(
-            f"Paciente {current_image['patient_id']} — "
-            f"{current_image['image_name']}"
+        confidence = st.slider(
+            "Confianza",
+            min_value=1,
+            max_value=5,
+            value=existing_metadata.get("confidence", 5),
+        )
+        notes = st.text_area(
+            "Notas Clínicas",
+            value=existing_metadata.get("clinical_notes", ""),
+            placeholder="Ej., Signo de silueta presente, afectación bilateral",
         )
 
-        col_canvas, col_meta = st.columns([3, 1])
-
-        # ── Canvas ─────────────────────────────────────────────────────
-        with col_canvas:
-            # How many consolidation sites exist?
-            state_key_preview = (
-                f"consol_{current_image['patient_id']}_"
-                f"{current_image['image_name']}"
-            )
-            n_sites = 1
-            if state_key_preview in st.session_state:
-                n_sites = max(1, len(st.session_state[state_key_preview]))
-
-            # ── Site picker (controls stroke colour only) ──────────────
-            # Always render the selectbox (even with 1 site) so
-            # that the widget tree structure stays stable and the
-            # canvas below never gets remounted / loses drawings.
-            if "active_site" not in st.session_state:
-                st.session_state.active_site = 0
-
-            active_site = st.selectbox(
-                "🫁 Sitio de Consolidación Activo (elija color para dibujar)",
-                list(range(n_sites)),
-                format_func=lambda i: (
-                    f"Sitio {i + 1} — {get_color_for_index(i)[1]}"
-                ),
-                index=min(
-                    st.session_state.active_site, n_sites - 1
-                ),
-                key="site_picker",
-            )
-            st.session_state.active_site = active_site
-
-            # Active site colour
-            active_hex, active_label = get_color_for_index(active_site)
-            r_c = int(active_hex[1:3], 16)
-            g_c = int(active_hex[3:5], 16)
-            b_c = int(active_hex[5:7], 16)
-            fill_rgba = f"rgba({r_c}, {g_c}, {b_c}, 0.3)"
-
-            # Build colour legend
-            color_legend_parts = []
-            for ci in range(n_sites):
-                hex_c, label = get_color_for_index(ci)
-                marker = "▶" if ci == active_site else "⬤"
-                color_legend_parts.append(
-                    f'<span style="color:{hex_c};font-weight:bold;">'
-                    f'{marker} Sitio {ci + 1}</span>'
+        # Drawn area stats
+        if canvas_result.image_data is not None:
+            alpha = canvas_result.image_data[:, :, 3]
+            drawn_px = int(np.sum(alpha > 0))
+            total_px = alpha.shape[0] * alpha.shape[1]
+            if drawn_px > 0:
+                st.metric(
+                    "Área Dibujada",
+                    f"{(drawn_px / total_px) * 100:.2f}%",
                 )
-            st.markdown(
-                " &nbsp; ".join(color_legend_parts),
-                unsafe_allow_html=True,
-            )
+                st.metric("Píxeles", f"{drawn_px:,}")
 
-            if zoom_level > 1.0:
-                st.write(
-                    f"**🎨 Dibujando con color {active_label}** "
-                    f"(🔍 {zoom_level:.1f}x — Desplace ↕ para zoom, "
-                    f"use botones de flecha para desplazar)"
-                )
-            else:
-                st.write(
-                    f"**🎨 Dibujando con color {active_label}** "
-                    f"(Desplace ↕ sobre la imagen para zoom)"
-                )
+        st.divider()
 
-            # ONE canvas per image — all sites draw here.
-            # Only zoom/pan changes the key; switching active site
-            # just changes the stroke colour, keeping all drawings.
-            canvas_result = st_canvas(
-                fill_color=fill_rgba,
-                stroke_width=stroke_width,
-                stroke_color=active_hex,
-                background_image=Image.fromarray(img_for_canvas),
-                background_color="#000000",
-                update_streamlit=True,
-                height=canvas_h,
-                width=canvas_w,
-                drawing_mode=drawing_mode,
-                key=f"canvas_{current_image['patient_id']}_"
-                    f"{current_image['image_name']}_z{zoom_level}_"
-                    f"x{zoom_pan_x}_y{zoom_pan_y}",
-            )
+        # ── Save Button ──────────────────────────────────────────
+        def _build_metadata():
+            return {
+                "consolidations": consolidations,
+                "involved_lobes": involved_lobes,
+                "multilobar": len(involved_lobes) >= 2,
+                "confidence": confidence,
+                "clinical_notes": notes,
+            }
 
-            # --- Mouse-wheel zoom via JS injection ------------------
-            import streamlit.components.v1 as components
-            components.html(
-                """
-                <script>
-                (function() {
-                    // Find the Streamlit canvas elements
-                    const doc = window.parent.document;
-                    const canvases = doc.querySelectorAll(
-                        'canvas[id*="canvas"]'
-                    );
-                    // Also listen on the overall app container
-                    const appContainer = doc.querySelector(
-                        '[data-testid="stAppViewContainer"]'
-                    ) || doc.body;
-
-                    function handleWheel(e) {
-                        // Only act when scrolling over the canvas area
-                        const target = e.target;
-                        const isCanvas = (
-                            target.tagName === 'CANVAS' ||
-                            target.closest('.stCanvasContainer') ||
-                            target.closest('[data-testid="stImage"]')
-                        );
-                        if (!isCanvas) return;
-
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        // deltaY > 0 = scroll down = zoom out
-                        const direction = e.deltaY > 0 ? 'out' : 'in';
-
-                        // Find the zoom +/- buttons
-                        const buttons = doc.querySelectorAll('button');
-                        let targetBtn = null;
-                        for (const btn of buttons) {
-                            const txt = btn.textContent.trim();
-                            if (direction === 'in' && txt === '➕') {
-                                targetBtn = btn;
-                                break;
-                            }
-                            if (direction === 'out' && txt === '➖') {
-                                targetBtn = btn;
-                                break;
-                            }
-                        }
-                        if (targetBtn) {
-                            targetBtn.click();
-                        }
-                    }
-
-                    // Attach with capture to intercept before scroll
-                    appContainer.addEventListener(
-                        'wheel', handleWheel, {passive: false, capture: true}
-                    );
-                })();
-                </script>
-                """,
-                height=0,
-            )
-
-            # Show thumbnail with zoom rectangle when zoomed in
-            if zoom_level > 1.0:
-                st.caption("📍 Vista general — el recuadro rojo muestra la región de zoom actual")
-                thumb_w = 250
-                thumb, _ = scale_image_preserve_ratio(img_scaled, thumb_w)
-                thumb_h_actual = thumb.shape[0]
-                # Draw rectangle on thumbnail showing zoomed area
-                th_ratio = thumb_w / img_scaled.shape[1]
-                rx1 = int(start_x * th_ratio)
-                ry1 = int(start_y * th_ratio)
-                rx2 = int((start_x + crop_w) * th_ratio)
-                ry2 = int((start_y + crop_h) * th_ratio)
-                thumb_copy = thumb.copy()
-                cv2.rectangle(thumb_copy, (rx1, ry1), (rx2, ry2),
-                              (255, 0, 0), 2)
-                st.image(thumb_copy, width=thumb_w)
-
-        # ── Metadata column ───────────────────────────────────────────
-        with col_meta:
-            st.write("**📝 Metadatos de Anotación**")
-
-            # Load existing metadata if any
-            existing_metadata = {}
-            if current_image["metadata_path"].exists():
-                try:
-                    with open(current_image["metadata_path"], "r") as f:
-                        existing_metadata = json.load(f)
-                except Exception:
-                    pass
-
-            # ── Multilobar consolidations ──────────────────────────────
-            st.write("**🫁 Consolidation Sites**")
-
-            location_options = [
-                "Right Upper Lobe",
-                "Right Middle Lobe",
-                "Right Lower Lobe",
-                "Left Upper Lobe",
-                "Left Lower Lobe",
-                "Lingula",
-            ]
-            type_options = [
-                "Solid Consolidation",
-                "Ground Glass Opacity",
-                "Air Bronchograms",
-                "Pleural Effusion",
-                "Mixed",
-            ]
-
-            # Initialise session-state list for consolidations
-            state_key = (
-                f"consol_{current_image['patient_id']}_"
-                f"{current_image['image_name']}"
-            )
-            if state_key not in st.session_state:
-                # Pre-fill from existing metadata
-                saved = existing_metadata.get("consolidations", [])
-                if saved:
-                    st.session_state[state_key] = saved
-                else:
-                    st.session_state[state_key] = [
-                        {"location": "Lóbulo Inferior Derecho",
-                         "type": "Consolidación Sólida"}
-                    ]
-
-            consolidations = st.session_state[state_key]
-
-            # Render each consolidation entry
-            for idx, entry in enumerate(consolidations):
-                site_hex, site_label = get_color_for_index(idx)
-                with st.expander(
-                    f"⬤ Sitio {idx + 1}: {entry['location']}  "
-                    f"({site_label})",
-                    expanded=True,
-                ):
-                    loc = st.selectbox(
-                        "Ubicación",
-                        location_options,
-                        index=(
-                            location_options.index(entry["location"])
-                            if entry["location"] in location_options
-                            else 0
-                        ),
-                        key=f"loc_{state_key}_{idx}",
-                    )
-                    ctype = st.selectbox(
-                        "Tipo",
-                        type_options,
-                        index=(
-                            type_options.index(entry["type"])
-                            if entry["type"] in type_options
-                            else 0
-                        ),
-                        key=f"type_{state_key}_{idx}",
-                    )
-                    consolidations[idx] = {"location": loc, "type": ctype}
-
-                    if len(consolidations) > 1:
-                        if st.button(
-                            "🗑️ Eliminar", key=f"rm_{state_key}_{idx}",
-                            use_container_width=True,
-                        ):
-                            consolidations.pop(idx)
-                            st.rerun()
-
-            if st.button("➕ Agregar Otro Sitio de Consolidación",
-                         use_container_width=True):
-                consolidations.append(
-                    {"location": "Lóbulo Inferior Izquierdo",
-                     "type": "Consolidación Sólida"}
-                )
-                # Auto-switch to the new site so the next strokes
-                # use the new colour immediately
-                st.session_state.active_site = len(consolidations) - 1
-                st.rerun()
-
-            st.divider()
-
-            # Pattern summary
-            involved_lobes = list({c["location"] for c in consolidations})
-            if len(involved_lobes) >= 2:
-                st.info(
-                    f"🔴 Neumonía **Multilobar** — "
-                    f"{len(involved_lobes)} lóbulos afectados"
-                )
-            else:
-                st.info(f"🟡 **Unilobar** — {involved_lobes[0]}")
-
-            confidence = st.slider(
-                "Confianza",
-                min_value=1,
-                max_value=5,
-                value=existing_metadata.get("confidence", 5),
-            )
-            notes = st.text_area(
-                "Notas Clínicas",
-                value=existing_metadata.get("clinical_notes", ""),
-                placeholder="Ej., Signo de silueta presente, afectación bilateral",
-            )
-
-            # Drawn area stats
-            if canvas_result.image_data is not None:
-                alpha = canvas_result.image_data[:, :, 3]
-                drawn_px = int(np.sum(alpha > 0))
-                total_px = alpha.shape[0] * alpha.shape[1]
-                if drawn_px > 0:
-                    st.metric(
-                        "Área Dibujada",
-                        f"{(drawn_px / total_px) * 100:.2f}%",
-                    )
-                    st.metric("Píxeles", f"{drawn_px:,}")
-
-            st.divider()
-
-            # ── Save / Delete ──────────────────────────────────────────
-            b1, b2 = st.columns(2)
-
-            def _build_metadata():
-                return {
-                    "consolidations": consolidations,
-                    "involved_lobes": involved_lobes,
-                    "multilobar": len(involved_lobes) >= 2,
-                    "confidence": confidence,
-                    "clinical_notes": notes,
-                }
-
-            with b1:
-                if st.button(
-                    "💾 Guardar y Siguiente", type="primary",
-                    use_container_width=True,
-                ):
-                    if (
-                        canvas_result.image_data is not None
-                        and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
-                    ):
-                        mask = canvas_result.image_data[:, :, 3]
-                        save_annotation_in_patient_folder(
-                            current_image["image_path"],
-                            mask,
-                            annotator_name,
-                            _build_metadata(),
-                            img_rgb.shape,
-                        )
-                        st.success("✅ ¡Guardado!")
-                        if (
-                            st.session_state.current_index
-                            < len(filtered_images) - 1
-                        ):
-                            st.session_state.current_index += 1
-                        st.rerun()
-                    else:
-                        st.error("¡Por favor dibuje una anotación primero!")
-
-            with b2:
-                if st.button("💾 Solo Guardar", use_container_width=True):
-                    if (
-                        canvas_result.image_data is not None
-                        and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
-                    ):
-                        mask = canvas_result.image_data[:, :, 3]
-                        save_annotation_in_patient_folder(
-                            current_image["image_path"],
-                            mask,
-                            annotator_name,
-                            _build_metadata(),
-                            img_rgb.shape,
-                        )
-                        st.success("✅ ¡Guardado!")
-                    else:
-                        st.error("¡Por favor dibuje una anotación primero!")
-
-            if current_image["annotated"]:
-                if st.button("🗑️ Eliminar Anotación",
-                             use_container_width=True):
-                    if current_image["mask_path"].exists():
-                        current_image["mask_path"].unlink()
-                    if current_image["metadata_path"].exists():
-                        current_image["metadata_path"].unlink()
-                    st.success("¡Anotación eliminada!")
-                    st.rerun()
-
-            # ── Download All Button ───────────────────────────────────
-            st.divider()
-            st.write("**📥 Descargar Anotación**")
-            
-            # Generate file ID from patient_id and image name
-            file_id = f"{current_image['patient_id']}_{current_image['image_path'].stem}"
-            
-            # Check if we have annotation data to download
-            has_current_annotation = (
+        if st.button("💾 Guardar Anotación", type="primary",
+                     use_container_width=True):
+            if (
                 canvas_result.image_data is not None
                 and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
-            )
-            has_saved_annotation = (
-                current_image["annotated"] and current_image["mask_path"].exists()
+            ):
+                mask = canvas_result.image_data[:, :, 3]
+                save_annotation_in_patient_folder(
+                    current_image["image_path"],
+                    mask,
+                    annotator_name,
+                    _build_metadata(),
+                    img_rgb.shape,
+                )
+                st.success("✅ ¡Guardado!")
+                st.rerun()
+            else:
+                st.error("¡Por favor dibuje una anotación primero!")
+
+        if current_image["annotated"]:
+            if st.button("🗑️ Eliminar Anotación",
+                         use_container_width=True):
+                if current_image["mask_path"].exists():
+                    current_image["mask_path"].unlink()
+                if current_image["metadata_path"].exists():
+                    current_image["metadata_path"].unlink()
+                st.success("¡Anotación eliminada!")
+                st.rerun()
+
+        # ── Download All Button ───────────────────────────────────
+        st.divider()
+        st.write("**📥 Descargar Anotación**")
+        
+        # Generate file ID from patient_id and image name
+        file_id = f"{current_image['patient_id']}_{current_image['image_path'].stem}"
+        
+        # Check if we have annotation data to download
+        has_current_annotation = (
+            canvas_result.image_data is not None
+            and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
+        )
+        has_saved_annotation = (
+            current_image["annotated"] and current_image["mask_path"].exists()
+        )
+        
+        if has_current_annotation or has_saved_annotation:
+            # Create ZIP file with mask and JSON
+            zip_buffer = io.BytesIO()
+            
+            with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                if has_current_annotation:
+                    # Use current canvas data
+                    mask_data = canvas_result.image_data[:, :, 3]
+                    orig_h, orig_w = img_rgb.shape[:2]
+                    mask_resized = cv2.resize(
+                        mask_data, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
+                    )
+                    
+                    # Encode mask as PNG
+                    _, mask_buffer = cv2.imencode(".png", mask_resized)
+                    mask_bytes = mask_buffer.tobytes()
+                    
+                    # Create JSON metadata
+                    metadata_download = {
+                        "image_id": file_id,
+                        "image_name": current_image["image_name"],
+                        "patient_id": current_image["patient_id"],
+                        "annotator": annotator_name,
+                        "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                        "consolidations": consolidations,
+                        "involved_lobes": involved_lobes,
+                        "multilobar": len(involved_lobes) >= 2,
+                        "confidence": confidence,
+                        "clinical_notes": notes,
+                        "mask_dimensions": {"width": orig_w, "height": orig_h},
+                        "annotated_pixels": int(np.sum(mask_resized > 0)),
+                        "annotated_area_percent": float(
+                            np.sum(mask_resized > 0) / (orig_w * orig_h) * 100
+                        ),
+                    }
+                    json_bytes = json.dumps(metadata_download, indent=2).encode("utf-8")
+                else:
+                    # Use saved annotation
+                    existing_mask = cv2.imread(
+                        str(current_image["mask_path"]), cv2.IMREAD_GRAYSCALE
+                    )
+                    _, mask_buffer = cv2.imencode(".png", existing_mask)
+                    mask_bytes = mask_buffer.tobytes()
+                    
+                    if current_image["metadata_path"].exists():
+                        with open(current_image["metadata_path"], "r") as f:
+                            existing_json = json.load(f)
+                        json_bytes = json.dumps(existing_json, indent=2).encode("utf-8")
+                    else:
+                        json_bytes = b"{}"
+                
+                # Add files to ZIP
+                zf.writestr(f"{file_id}_mask.png", mask_bytes)
+                zf.writestr(f"{file_id}_annotation.json", json_bytes)
+            
+            zip_buffer.seek(0)
+            
+            st.download_button(
+                label="📦 Descargar Todo (ZIP)",
+                data=zip_buffer.getvalue(),
+                file_name=f"{file_id}_annotation.zip",
+                mime="application/zip",
+                use_container_width=True,
+                type="primary",
             )
             
-            if has_current_annotation or has_saved_annotation:
-                # Create ZIP file with mask and JSON
-                zip_buffer = io.BytesIO()
-                
-                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
-                    if has_current_annotation:
-                        # Use current canvas data
-                        mask_data = canvas_result.image_data[:, :, 3]
-                        orig_h, orig_w = img_rgb.shape[:2]
-                        mask_resized = cv2.resize(
-                            mask_data, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
-                        )
-                        
-                        # Encode mask as PNG
-                        _, mask_buffer = cv2.imencode(".png", mask_resized)
-                        mask_bytes = mask_buffer.tobytes()
-                        
-                        # Create JSON metadata
-                        metadata_download = {
-                            "image_id": file_id,
-                            "image_name": current_image["image_name"],
-                            "patient_id": current_image["patient_id"],
-                            "annotator": annotator_name,
-                            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-                            "consolidations": consolidations,
-                            "involved_lobes": involved_lobes,
-                            "multilobar": len(involved_lobes) >= 2,
-                            "confidence": confidence,
-                            "clinical_notes": notes,
-                            "mask_dimensions": {"width": orig_w, "height": orig_h},
-                            "annotated_pixels": int(np.sum(mask_resized > 0)),
-                            "annotated_area_percent": float(
-                                np.sum(mask_resized > 0) / (orig_w * orig_h) * 100
-                            ),
-                        }
-                        json_bytes = json.dumps(metadata_download, indent=2).encode("utf-8")
-                    else:
-                        # Use saved annotation
-                        existing_mask = cv2.imread(
-                            str(current_image["mask_path"]), cv2.IMREAD_GRAYSCALE
-                        )
-                        _, mask_buffer = cv2.imencode(".png", existing_mask)
-                        mask_bytes = mask_buffer.tobytes()
-                        
-                        if current_image["metadata_path"].exists():
-                            with open(current_image["metadata_path"], "r") as f:
-                                existing_json = json.load(f)
-                            json_bytes = json.dumps(existing_json, indent=2).encode("utf-8")
-                        else:
-                            json_bytes = b"{}"
-                    
-                    # Add files to ZIP
-                    zf.writestr(f"{file_id}_mask.png", mask_bytes)
-                    zf.writestr(f"{file_id}_annotation.json", json_bytes)
-                
-                zip_buffer.seek(0)
-                
-                st.download_button(
-                    label="📦 Descargar Todo (ZIP)",
-                    data=zip_buffer.getvalue(),
-                    file_name=f"{file_id}_annotation.zip",
-                    mime="application/zip",
-                    use_container_width=True,
-                    type="primary",
-                )
-                
-                st.caption(f"Contenido: `{file_id}_mask.png` + `{file_id}_annotation.json`")
-            else:
-                st.info("Dibuje una anotación para habilitar la descarga")
-
-    # ================================================================
-    # TAB 2 — COMPARE
-    # ================================================================
-    with tab2:
-        st.header("Comparar Anotaciones Entre Radiólogos")
-
-        cmp1, cmp2 = st.columns(2)
-        with cmp1:
-            st.subheader("Radiólogo 1")
-            mask1_file = st.file_uploader(
-                "Subir Máscara 1", type=["png"], key="comp1"
-            )
-            name1 = st.text_input("Nombre", value="Radiólogo 1", key="name1")
-        with cmp2:
-            st.subheader("Radiólogo 2")
-            mask2_file = st.file_uploader(
-                "Subir Máscara 2", type=["png"], key="comp2"
-            )
-            name2 = st.text_input("Nombre", value="Radiólogo 2", key="name2")
-
-        if mask1_file and mask2_file:
-            mask1 = cv2.imdecode(
-                np.frombuffer(mask1_file.read(), np.uint8),
-                cv2.IMREAD_GRAYSCALE,
-            )
-            mask1_file.seek(0)
-            mask2 = cv2.imdecode(
-                np.frombuffer(mask2_file.read(), np.uint8),
-                cv2.IMREAD_GRAYSCALE,
-            )
-            mask2_file.seek(0)
-
-            if mask1.shape != mask2.shape:
-                mask2 = cv2.resize(mask2, (mask1.shape[1], mask1.shape[0]))
-
-            dice = calculate_dice_coefficient(mask1, mask2)
-            iou = calculate_iou(mask1, mask2)
-            precision, recall = calculate_precision_recall(mask1, mask2)
-
-            st.subheader("📊 Concordancia Inter-Evaluador")
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Dice", f"{dice:.4f}")
-            m2.metric("IoU", f"{iou:.4f}")
-            m3.metric("Precisión", f"{precision:.4f}")
-            m4.metric("Sensibilidad", f"{recall:.4f}")
-
-            if dice >= 0.80:
-                st.success("✅ Concordancia Excelente")
-            elif dice >= 0.70:
-                st.info("ℹ️ Buena Concordancia")
-            elif dice >= 0.50:
-                st.warning("⚠️ Concordancia Regular — Se recomienda revisión")
-            else:
-                st.error("❌ Concordancia Deficiente — Se necesita consenso")
-
-            st.subheader("Comparación Visual")
-            overlay = np.zeros(
-                (mask1.shape[0], mask1.shape[1], 3), dtype=np.uint8
-            )
-            overlay[mask1 > 0] = [0, 255, 0]
-            overlap = (mask1 > 0) & (mask2 > 0)
-            overlay[mask2 > 0] = [255, 0, 0]
-            overlay[overlap] = [255, 255, 0]
-            st.image(
-                overlay,
-                caption=(
-                    f"Verde: {name1} | Rojo: {name2} | Amarillo: Concordancia"
-                ),
-                use_column_width=True,
-            )
-
-    # ================================================================
-    # TAB 3 — GUIDELINES
-    # ================================================================
-    with tab3:
-        st.header("📖 Guía de Anotación")
-        st.markdown(
-            """
-### Qué Anotar
-
-La **consolidación por neumonía** aparece como áreas blancas/opacas donde los
-espacios aéreos están llenos de líquido.
-
-### Neumonía Multilobar
-
-Cuando la consolidación está presente en **más de un lóbulo**, agregue una
-entrada de consolidación separada para cada sitio afectado usando el botón
-**"➕ Agregar Otro Sitio de Consolidación"**. Esto nos permite rastrear la
-afectación multilobar con precisión.
-
-### Signos Radiológicos Clave
-
-#### ✅ Incluir en Su Máscara
-1. **Broncograma Aéreo** — Tubos ramificados oscuros dentro de la consolidación
-2. **Signo de la Silueta** — Borde del corazón/diafragma perdido en la consolidación
-3. **Consolidación Sólida** — Áreas opacas blancas densas
-4. **Opacidad en Vidrio Esmerilado** — Áreas difusas sutiles en los bordes
-
-#### ❌ Excluir de Su Máscara
-1. **Costillas** — Trace "a través de" las sombras costales
-2. **Tejido pulmonar normal** — No sobre-segmente
-3. **Derrame pleural** (a menos que se solicite) — Signo del menisco suave
-
-### Herramientas de Dibujo
-| Herramienta | Uso |
-|---|---|
-| **freedraw** | Trazado a mano libre de los bordes de consolidación |
-| **rect** | ROI rectangular rápido |
-| **circle** | Regiones circulares/ovaladas |
-| **line** | Trazado de bordes rectos |
-
-### Colores
-Cada sitio de consolidación tiene asignado automáticamente un **color único**
-(Verde Lima, Rojo, Azul, Dorado, …). Seleccione el sitio activo antes de dibujar
-para que las anotaciones sean visualmente distinguibles.
-
-### Consejos
-1. **Dibuje directamente** en el lienzo — no necesita herramientas externas
-2. **Ajuste el tamaño del pincel** con el deslizador de la barra lateral
-3. **Zoom**: desplace ↕ la rueda del ratón sobre la imagen, o use los
-   botones ➕/➖ en la barra lateral
-4. **Desplazar**: cuando tenga zoom, use los botones de flecha (⬅️➡️⬆️⬇️) o
-   deslizadores para navegar
-5. **Sea consistente** — mismos criterios para cada imagen
-
-### Métricas de Calidad
-| Puntaje Dice | Interpretación |
-|---|---|
-| > 0.80 | ✅ Concordancia excelente |
-| 0.70 – 0.80 | Buena concordancia |
-| < 0.70 | ⚠️ Necesita revisión / consenso |
-"""
-        )
+            st.caption(f"Contenido: `{file_id}_mask.png` + `{file_id}_annotation.json`")
+        else:
+            st.info("Dibuje una anotación para habilitar la descarga")
 
 
 if __name__ == "__main__":
