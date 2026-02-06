@@ -157,10 +157,18 @@ def calculate_precision_recall(ground_truth, prediction):
 
 def load_image_from_path(image_path):
     """Load image as RGB numpy array (original, no CLAHE)."""
-    img = cv2.imread(str(image_path))
-    if img is None:
+    logger.info(f"Loading image from: {image_path}")
+    logger.info(f"Path exists: {Path(image_path).exists()}")
+    try:
+        img = cv2.imread(str(image_path))
+        if img is None:
+            logger.error(f"cv2.imread returned None for: {image_path}")
+            return None
+        logger.info(f"Image loaded successfully: shape={img.shape}, dtype={img.dtype}")
+        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    except Exception as e:
+        logger.error(f"Exception loading image: {e}")
         return None
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
 def scale_image_preserve_ratio(img, target_width=900):
@@ -406,14 +414,18 @@ def main():
         ["Todas las Imágenes", "Sin Anotar", "Anotadas"],
         index=1,
     )
+    logger.info(f"Filter selected: {show_filter}")
     if show_filter == "Sin Anotar":
         filtered_images = [i for i in patient_images if not i["annotated"]]
     elif show_filter == "Anotadas":
         filtered_images = [i for i in patient_images if i["annotated"]]
     else:
         filtered_images = patient_images
+    
+    logger.info(f"Filtered images count: {len(filtered_images)}")
 
     if not filtered_images:
+        logger.warning(f"No images match filter: {show_filter}")
         st.warning(f"No hay imágenes que coincidan con el filtro **{show_filter}**.")
         return
 
@@ -423,6 +435,7 @@ def main():
     if st.session_state.current_index >= len(filtered_images):
         st.session_state.current_index = 0
     current_image = filtered_images[st.session_state.current_index]
+    logger.info(f"Current image selected: {current_image['image_name']}")
 
     # ── Sidebar: drawing settings ──────────────────────────────────────
     st.sidebar.header("🎨 Configuración de Dibujo")
@@ -551,13 +564,18 @@ def main():
     st.divider()
 
     # Load original image (NO CLAHE)
+    logger.info(f"About to load image: {current_image['image_path']}")
     img_rgb = load_image_from_path(current_image["image_path"])
     if img_rgb is None:
+        logger.error(f"Failed to load image: {current_image['image_path']}")
         st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
         return
+    
+    logger.info(f"Image loaded successfully, shape: {img_rgb.shape}")
 
     # Scale image to canvas_width preserving aspect ratio
     img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
+    logger.info(f"Image scaled: {img_scaled.shape}, ratio: {scale_ratio}")
 
     # Apply zoom: crop a region of the scaled image and enlarge it
     if zoom_level > 1.0:
