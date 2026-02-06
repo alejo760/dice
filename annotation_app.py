@@ -2,11 +2,10 @@
 Herramienta de Anotación Ground Truth para Radiólogos - Consolidación por Neumonía
 
 Características:
-1. Navegar imágenes de rayos X desde la carpeta Pacientes automáticamente
+1. Subir imágenes de rayos X para anotación
 2. Anotar consolidación directamente en el navegador (sin herramientas externas)
 3. Múltiples entradas de consolidación para neumonía multilobar
-4. Guardar máscara + JSON de metadatos en la misma carpeta del paciente
-5. Seguimiento de progreso, comparación inter-evaluador, zoom, tema oscuro
+4. Guardar máscara + JSON de metadatos y descargar como ZIP
 """
 
 import streamlit as st
@@ -416,39 +415,12 @@ def main():
         )
         return
 
-    # ── Sidebar: progress ──────────────────────────────────────────────
-    annotated_count, total_count, progress_pct = get_annotation_progress(
-        patient_images
-    )
-    st.sidebar.header("📊 Progreso")
-    st.sidebar.progress(progress_pct / 100)
-    st.sidebar.metric("Anotadas", f"{annotated_count} / {total_count}")
-    st.sidebar.metric("Completado", f"{progress_pct:.1f}%")
-
-    # ── Sidebar: filter ────────────────────────────────────────────────
-    st.sidebar.header("🔍 Filtrar")
-    show_filter = st.sidebar.radio(
-        "Mostrar",
-        ["Todas las Imágenes", "Sin Anotar", "Anotadas"],
-        index=1,
-    )
-    if show_filter == "Sin Anotar":
-        filtered_images = [i for i in patient_images if not i["annotated"]]
-    elif show_filter == "Anotadas":
-        filtered_images = [i for i in patient_images if i["annotated"]]
-    else:
-        filtered_images = patient_images
-
-    if not filtered_images:
-        st.warning(f"No hay imágenes que coincidan con el filtro **{show_filter}**.")
-        return
-
     # ── Navigation state ───────────────────────────────────────────────
     if "current_index" not in st.session_state:
         st.session_state.current_index = 0
-    if st.session_state.current_index >= len(filtered_images):
+    if st.session_state.current_index >= len(patient_images):
         st.session_state.current_index = 0
-    current_image = filtered_images[st.session_state.current_index]
+    current_image = patient_images[st.session_state.current_index]
 
     # ── Sidebar: drawing settings ──────────────────────────────────────
     st.sidebar.header("🎨 Configuración de Dibujo")
@@ -461,108 +433,8 @@ def main():
         help="freedraw: pincel libre · rect/circle/line: formas",
     )
 
-    canvas_width = st.sidebar.slider(
-        "Ancho del Lienzo (px)", 600, 1400, 900, step=50,
-        help="Ajuste para que se adapte a su pantalla. La relación de aspecto siempre se preserva.",
-    )
-
-    # ── Sidebar: zoom controls ─────────────────────────────────────────
-    st.sidebar.header("🔍 Zoom & Pan")
-
-    # Initialise zoom state
-    if "zoom_level" not in st.session_state:
-        st.session_state.zoom_level = 1.0
-    if "zoom_pan_x" not in st.session_state:
-        st.session_state.zoom_pan_x = 0.5
-    if "zoom_pan_y" not in st.session_state:
-        st.session_state.zoom_pan_y = 0.5
-
-    # Quick zoom buttons
-    zb1, zb2, zb3, zb4 = st.sidebar.columns(4)
-    with zb1:
-        if st.button("➖", key="zoom_out", help="Alejar",
-                     use_container_width=True):
-            st.session_state.zoom_level = max(
-                1.0, round(st.session_state.zoom_level - 0.25, 2)
-            )
-            st.rerun()
-    with zb2:
-        if st.button("➕", key="zoom_in", help="Acercar",
-                     use_container_width=True):
-            st.session_state.zoom_level = min(
-                5.0, round(st.session_state.zoom_level + 0.25, 2)
-            )
-            st.rerun()
-    with zb3:
-        if st.button("🔄", key="zoom_reset", help="Restablecer zoom",
-                     use_container_width=True):
-            st.session_state.zoom_level = 1.0
-            st.session_state.zoom_pan_x = 0.5
-            st.session_state.zoom_pan_y = 0.5
-            st.rerun()
-    with zb4:
-        st.write(f"**{st.session_state.zoom_level:.1f}x**")
-
-    zoom_level = st.sidebar.slider(
-        "Nivel de Zoom", 1.0, 5.0, st.session_state.zoom_level, step=0.25,
-        help="Arrastre o use los botones ➕/➖ de arriba.",
-        key="zoom_slider",
-    )
-    if zoom_level != st.session_state.zoom_level:
-        st.session_state.zoom_level = zoom_level
-
-    if st.session_state.zoom_level > 1.0:
-        # Pan controls — arrows + sliders
-        st.sidebar.caption("**Desplazar (botones de flecha o deslizadores)**")
-        pa1, pa2, pa3 = st.sidebar.columns([1, 1, 1])
-        pan_step = 0.08
-        with pa1:
-            if st.button("⬅️", key="pan_left", use_container_width=True):
-                st.session_state.zoom_pan_x = max(
-                    0.0, round(st.session_state.zoom_pan_x - pan_step, 2)
-                )
-                st.rerun()
-            if st.button("⬆️", key="pan_up", use_container_width=True):
-                st.session_state.zoom_pan_y = max(
-                    0.0, round(st.session_state.zoom_pan_y - pan_step, 2)
-                )
-                st.rerun()
-        with pa2:
-            if st.button("➡️", key="pan_right", use_container_width=True):
-                st.session_state.zoom_pan_x = min(
-                    1.0, round(st.session_state.zoom_pan_x + pan_step, 2)
-                )
-                st.rerun()
-            if st.button("⬇️", key="pan_down", use_container_width=True):
-                st.session_state.zoom_pan_y = min(
-                    1.0, round(st.session_state.zoom_pan_y + pan_step, 2)
-                )
-                st.rerun()
-        with pa3:
-            st.write(
-                f"x={st.session_state.zoom_pan_x:.2f}\n"
-                f"y={st.session_state.zoom_pan_y:.2f}"
-            )
-
-        zoom_pan_x = st.sidebar.slider(
-            "Desplazar H", 0.0, 1.0, st.session_state.zoom_pan_x, step=0.05,
-            key="pan_h_slider",
-        )
-        zoom_pan_y = st.sidebar.slider(
-            "Desplazar V", 0.0, 1.0, st.session_state.zoom_pan_y, step=0.05,
-            key="pan_v_slider",
-        )
-        if zoom_pan_x != st.session_state.zoom_pan_x:
-            st.session_state.zoom_pan_x = zoom_pan_x
-        if zoom_pan_y != st.session_state.zoom_pan_y:
-            st.session_state.zoom_pan_y = zoom_pan_y
-    else:
-        st.session_state.zoom_pan_x = 0.5
-        st.session_state.zoom_pan_y = 0.5
-
-    zoom_pan_x = st.session_state.zoom_pan_x
-    zoom_pan_y = st.session_state.zoom_pan_y
-    zoom_level = st.session_state.zoom_level
+    # Fixed canvas width
+    canvas_width = 900
 
     # ── Image info ────────────────────────────────────────────────────
     col_info1, col_info2 = st.columns([3, 1])
@@ -584,32 +456,17 @@ def main():
 
     # Scale image to canvas_width preserving aspect ratio
     img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
-
-    # Apply zoom: crop a region of the scaled image and enlarge it
-    if zoom_level > 1.0:
-        zh, zw = img_scaled.shape[:2]
-        crop_h = int(zh / zoom_level)
-        crop_w = int(zw / zoom_level)
-        # Calculate crop origin from pan sliders
-        max_y = zh - crop_h
-        max_x = zw - crop_w
-        start_y = int(zoom_pan_y * max_y)
-        start_x = int(zoom_pan_x * max_x)
-        img_cropped = img_scaled[
-            start_y : start_y + crop_h,
-            start_x : start_x + crop_w,
-        ]
-        # Resize cropped region back to canvas dimensions
-        img_for_canvas = cv2.resize(
-            img_cropped, (zw, zh), interpolation=cv2.INTER_LINEAR
-        )
-    else:
-        img_for_canvas = img_scaled
-        start_x, start_y, crop_w, crop_h = (
-            0, 0, img_scaled.shape[1], img_scaled.shape[0]
-        )
+    img_for_canvas = img_scaled
+    
+    logger.info(f"Image loaded: shape={img_rgb.shape}, dtype={img_rgb.dtype}")
+    logger.info(f"Image scaled: shape={img_for_canvas.shape}, dtype={img_for_canvas.dtype}")
 
     canvas_h, canvas_w = img_for_canvas.shape[:2]
+    logger.info(f"Canvas dimensions: {canvas_w}x{canvas_h}")
+    
+    # Convert to PIL Image for canvas
+    pil_image = Image.fromarray(img_for_canvas)
+    logger.info(f"PIL Image: mode={pil_image.mode}, size={pil_image.size}")
 
     st.subheader(
         f"Paciente {current_image['patient_id']} — "
@@ -670,113 +527,22 @@ def main():
             unsafe_allow_html=True,
         )
 
-        if zoom_level > 1.0:
-            st.write(
-                f"**🎨 Dibujando con color {active_label}** "
-                f"(🔍 {zoom_level:.1f}x — Desplace ↕ para zoom, "
-                f"use botones de flecha para desplazar)"
-            )
-        else:
-            st.write(
-                f"**🎨 Dibujando con color {active_label}** "
-                f"(Desplace ↕ sobre la imagen para zoom)"
-            )
+        st.write(f"**🎨 Dibujando con color {active_label}**")
 
         # ONE canvas per image — all sites draw here.
-        # Only zoom/pan changes the key; switching active site
-        # just changes the stroke colour, keeping all drawings.
+        # Switching active site just changes the stroke colour, keeping all drawings.
         canvas_result = st_canvas(
             fill_color=fill_rgba,
             stroke_width=stroke_width,
             stroke_color=active_hex,
-            background_image=Image.fromarray(img_for_canvas),
+            background_image=pil_image,
             background_color="#000000",
             update_streamlit=True,
             height=canvas_h,
             width=canvas_w,
             drawing_mode=drawing_mode,
-            key=f"canvas_{current_image['patient_id']}_"
-                f"{current_image['image_name']}_z{zoom_level}_"
-                f"x{zoom_pan_x}_y{zoom_pan_y}",
+            key=f"canvas_{current_image['patient_id']}_{current_image['image_name']}",
         )
-
-        # --- Mouse-wheel zoom via JS injection ------------------
-        import streamlit.components.v1 as components
-        components.html(
-            """
-            <script>
-            (function() {
-                // Find the Streamlit canvas elements
-                const doc = window.parent.document;
-                const canvases = doc.querySelectorAll(
-                    'canvas[id*="canvas"]'
-                );
-                // Also listen on the overall app container
-                const appContainer = doc.querySelector(
-                    '[data-testid="stAppViewContainer"]'
-                ) || doc.body;
-
-                function handleWheel(e) {
-                    // Only act when scrolling over the canvas area
-                    const target = e.target;
-                    const isCanvas = (
-                        target.tagName === 'CANVAS' ||
-                        target.closest('.stCanvasContainer') ||
-                        target.closest('[data-testid="stImage"]')
-                    );
-                    if (!isCanvas) return;
-
-                    e.preventDefault();
-                    e.stopPropagation();
-
-                    // deltaY > 0 = scroll down = zoom out
-                    const direction = e.deltaY > 0 ? 'out' : 'in';
-
-                    // Find the zoom +/- buttons
-                    const buttons = doc.querySelectorAll('button');
-                    let targetBtn = null;
-                    for (const btn of buttons) {
-                        const txt = btn.textContent.trim();
-                        if (direction === 'in' && txt === '➕') {
-                            targetBtn = btn;
-                            break;
-                        }
-                        if (direction === 'out' && txt === '➖') {
-                            targetBtn = btn;
-                            break;
-                        }
-                    }
-                    if (targetBtn) {
-                        targetBtn.click();
-                    }
-                }
-
-                // Attach with capture to intercept before scroll
-                appContainer.addEventListener(
-                    'wheel', handleWheel, {passive: false, capture: true}
-                );
-            })();
-            </script>
-            """,
-            height=0,
-        )
-
-        # Show thumbnail with zoom rectangle when zoomed in
-        if zoom_level > 1.0:
-            st.caption("📍 Vista general — el recuadro rojo muestra la región de zoom actual")
-            thumb_w = 250
-            thumb, _ = scale_image_preserve_ratio(img_scaled, thumb_w)
-            thumb_h_actual = thumb.shape[0]
-            # Draw rectangle on thumbnail showing zoomed area
-            th_ratio = thumb_w / img_scaled.shape[1]
-            rx1 = int(start_x * th_ratio)
-            ry1 = int(start_y * th_ratio)
-            rx2 = int((start_x + crop_w) * th_ratio)
-            ry2 = int((start_y + crop_h) * th_ratio)
-            thumb_copy = thumb.copy()
-            cv2.rectangle(thumb_copy, (rx1, ry1), (rx2, ry2),
-                          (255, 0, 0), 2)
-            st.image(thumb_copy, width=thumb_w)
 
     # ── Metadata column ───────────────────────────────────────────
     with col_meta:
