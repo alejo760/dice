@@ -477,7 +477,7 @@ def main():
     # ── Canvas with image background ───────────────────────────────
     with col_canvas:
         # Display the X-ray image first
-        st.image(pil_image, caption="Radiografía de Tórax", use_container_width=False, width=canvas_w)
+        st.image(pil_image, caption="Radiografía de Tórax", width=canvas_w)
         
         st.markdown("**⬇️ Dibuje la consolidación en el lienzo negro debajo:**")
         
