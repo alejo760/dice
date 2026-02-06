@@ -299,8 +299,20 @@ def main():
     except Exception as e:
         st.error(f"Error creating upload directory: {e}")
     
-    # Handle uploaded files
+    # Handle uploaded files - clear previous images when new ones are uploaded
     if uploaded_files:
+        # Get names of currently uploaded files
+        uploaded_names = {uf.name for uf in uploaded_files}
+        
+        # Delete all existing files that are not in the current upload
+        try:
+            for existing_file in upload_dir.iterdir():
+                if existing_file.is_file() and existing_file.name not in uploaded_names:
+                    existing_file.unlink()
+        except Exception:
+            pass
+        
+        # Save new files
         new_files_uploaded = False
         for uf in uploaded_files:
             file_path = upload_dir / uf.name
@@ -313,6 +325,8 @@ def main():
                     st.sidebar.error(f"Error saving {uf.name}: {e}")
         
         if new_files_uploaded:
+            # Reset navigation state for new images
+            st.session_state.current_index = 0
             st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
             st.rerun()
     
