@@ -17,6 +17,7 @@ import pandas as pd
 from pathlib import Path
 import json
 import io
+import zipfile
 from datetime import datetime
 from streamlit_drawable_canvas import st_canvas
 import hashlib
@@ -262,16 +263,12 @@ def main():
     
     # Show logout button
     logout_button()
-
-    # ── Sidebar: annotator ─────────────────────────────────────────────
-    st.sidebar.header("👤 Annotator")
-    annotator_name = st.sidebar.text_input("Your Name / ID", value="Radiologist1")
-
-    # ── Sidebar: patients path ─────────────────────────────────────────
-    st.sidebar.header("📁 Datos del Paciente")
     
-    # Image upload for cloud deployment
-    st.sidebar.subheader("📤 Subir Radiografías")
+    # Use logged-in username as annotator name
+    annotator_name = st.session_state.username
+
+    # ── Sidebar: Upload Images ─────────────────────────────────────────
+    st.sidebar.header("📤 Subir Radiografías")
     uploaded_files = st.sidebar.file_uploader(
         "Subir imágenes de rayos X de tórax",
         type=["jpg", "jpeg", "png"],
@@ -285,27 +282,29 @@ def main():
     
     if uploaded_files:
         for uf in uploaded_files:
-            # Use filename (without extension) as patient ID
             file_path = upload_dir / uf.name
             with open(file_path, "wb") as f:
                 f.write(uf.getbuffer())
         st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
     
     st.sidebar.divider()
-    
-    patients_path = st.sidebar.text_input(
-        "Ruta de Carpeta de Imágenes",
-        value="./uploaded_images",
-        help="Carpeta con imágenes (use el cargador de arriba para nube, o ruta local)",
-    )
 
     # ── Load images ────────────────────────────────────────────────────
+    patients_path = "./uploaded_images"
     patient_images = get_all_patient_images(patients_path)
 
     if not patient_images:
-        st.error(
-            f"No se encontraron imágenes JPG en **{patients_path}**. "
-            "Verifique la ruta y asegúrese de que las carpetas contengan archivos .jpg."
+        st.info(
+            "📤 **Suba imágenes de rayos X** usando el panel lateral para comenzar a anotar."
+        )
+        st.markdown("---")
+        st.markdown(
+            """
+            ### 📋 Instrucciones:
+            1. **Suba sus imágenes** usando el cargador en el panel lateral izquierdo
+            2. **Dibuje las consolidaciones** directamente sobre la imagen
+            3. **Guarde la anotación** y descargue los archivos de salida (máscara PNG + JSON)
+            """
         )
         return
 
@@ -908,107 +907,91 @@ def main():
                     st.success("¡Anotación eliminada!")
                     st.rerun()
 
-            # ── Download Buttons ───────────────────────────────────────
+            # ── Download All Button ───────────────────────────────────
             st.divider()
             st.write("**📥 Descargar Anotación**")
             
             # Generate file ID from patient_id and image name
             file_id = f"{current_image['patient_id']}_{current_image['image_path'].stem}"
             
-            # Download mask
-            if (
+            # Check if we have annotation data to download
+            has_current_annotation = (
                 canvas_result.image_data is not None
                 and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
-            ):
-                # Create mask from current canvas
-                mask_data = canvas_result.image_data[:, :, 3]
-                # Resize to original image dimensions
-                orig_h, orig_w = img_rgb.shape[:2]
-                mask_resized = cv2.resize(
-                    mask_data, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
-                )
-                
-                # Encode mask as PNG
-                _, mask_buffer = cv2.imencode(".png", mask_resized)
-                mask_bytes = mask_buffer.tobytes()
-                
-                # Create JSON metadata
-                metadata_download = {
-                    "image_id": file_id,
-                    "image_name": current_image["image_name"],
-                    "patient_id": current_image["patient_id"],
-                    "annotator": annotator_name,
-                    "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
-                    "consolidations": consolidations,
-                    "involved_lobes": involved_lobes,
-                    "multilobar": len(involved_lobes) >= 2,
-                    "confidence": confidence,
-                    "clinical_notes": notes,
-                    "mask_dimensions": {"width": orig_w, "height": orig_h},
-                    "annotated_pixels": int(np.sum(mask_resized > 0)),
-                    "annotated_area_percent": float(
-                        np.sum(mask_resized > 0) / (orig_w * orig_h) * 100
-                    ),
-                }
-                json_bytes = json.dumps(metadata_download, indent=2).encode("utf-8")
-                
-                dl1, dl2 = st.columns(2)
-                with dl1:
-                    st.download_button(
-                        label="📥 Descargar Máscara (PNG)",
-                        data=mask_bytes,
-                        file_name=f"{file_id}_mask.png",
-                        mime="image/png",
-                        use_container_width=True,
-                    )
-                with dl2:
-                    st.download_button(
-                        label="📥 Descargar JSON",
-                        data=json_bytes,
-                        file_name=f"{file_id}_annotation.json",
-                        mime="application/json",
-                        use_container_width=True,
-                    )
-                
-                st.caption(f"Los archivos se llamarán: `{file_id}_mask.png` y `{file_id}_annotation.json`")
+            )
+            has_saved_annotation = (
+                current_image["annotated"] and current_image["mask_path"].exists()
+            )
             
-            elif current_image["annotated"] and current_image["mask_path"].exists():
-                # Load existing saved annotation for download
-                existing_mask = cv2.imread(
-                    str(current_image["mask_path"]), cv2.IMREAD_GRAYSCALE
-                )
-                if existing_mask is not None:
-                    _, mask_buffer = cv2.imencode(".png", existing_mask)
-                    mask_bytes = mask_buffer.tobytes()
-                    
-                    # Load existing JSON
-                    if current_image["metadata_path"].exists():
-                        with open(current_image["metadata_path"], "r") as f:
-                            existing_json = json.load(f)
-                        json_bytes = json.dumps(existing_json, indent=2).encode("utf-8")
+            if has_current_annotation or has_saved_annotation:
+                # Create ZIP file with mask and JSON
+                zip_buffer = io.BytesIO()
+                
+                with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+                    if has_current_annotation:
+                        # Use current canvas data
+                        mask_data = canvas_result.image_data[:, :, 3]
+                        orig_h, orig_w = img_rgb.shape[:2]
+                        mask_resized = cv2.resize(
+                            mask_data, (orig_w, orig_h), interpolation=cv2.INTER_NEAREST
+                        )
+                        
+                        # Encode mask as PNG
+                        _, mask_buffer = cv2.imencode(".png", mask_resized)
+                        mask_bytes = mask_buffer.tobytes()
+                        
+                        # Create JSON metadata
+                        metadata_download = {
+                            "image_id": file_id,
+                            "image_name": current_image["image_name"],
+                            "patient_id": current_image["patient_id"],
+                            "annotator": annotator_name,
+                            "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S"),
+                            "consolidations": consolidations,
+                            "involved_lobes": involved_lobes,
+                            "multilobar": len(involved_lobes) >= 2,
+                            "confidence": confidence,
+                            "clinical_notes": notes,
+                            "mask_dimensions": {"width": orig_w, "height": orig_h},
+                            "annotated_pixels": int(np.sum(mask_resized > 0)),
+                            "annotated_area_percent": float(
+                                np.sum(mask_resized > 0) / (orig_w * orig_h) * 100
+                            ),
+                        }
+                        json_bytes = json.dumps(metadata_download, indent=2).encode("utf-8")
                     else:
-                        json_bytes = b"{}"
+                        # Use saved annotation
+                        existing_mask = cv2.imread(
+                            str(current_image["mask_path"]), cv2.IMREAD_GRAYSCALE
+                        )
+                        _, mask_buffer = cv2.imencode(".png", existing_mask)
+                        mask_bytes = mask_buffer.tobytes()
+                        
+                        if current_image["metadata_path"].exists():
+                            with open(current_image["metadata_path"], "r") as f:
+                                existing_json = json.load(f)
+                            json_bytes = json.dumps(existing_json, indent=2).encode("utf-8")
+                        else:
+                            json_bytes = b"{}"
                     
-                    dl1, dl2 = st.columns(2)
-                    with dl1:
-                        st.download_button(
-                            label="📥 Descargar Máscara Guardada",
-                            data=mask_bytes,
-                            file_name=f"{file_id}_mask.png",
-                            mime="image/png",
-                            use_container_width=True,
-                        )
-                    with dl2:
-                        st.download_button(
-                            label="📥 Descargar JSON Guardado",
-                            data=json_bytes,
-                            file_name=f"{file_id}_annotation.json",
-                            mime="application/json",
-                            use_container_width=True,
-                        )
-                    st.caption(f"Archivos: `{file_id}_mask.png` / `{file_id}_annotation.json`")
+                    # Add files to ZIP
+                    zf.writestr(f"{file_id}_mask.png", mask_bytes)
+                    zf.writestr(f"{file_id}_annotation.json", json_bytes)
+                
+                zip_buffer.seek(0)
+                
+                st.download_button(
+                    label="📦 Descargar Todo (ZIP)",
+                    data=zip_buffer.getvalue(),
+                    file_name=f"{file_id}_annotation.zip",
+                    mime="application/zip",
+                    use_container_width=True,
+                    type="primary",
+                )
+                
+                st.caption(f"Contenido: `{file_id}_mask.png` + `{file_id}_annotation.json`")
             else:
-                st.info("Dibuje una anotación para habilitar las descargas")
+                st.info("Dibuje una anotación para habilitar la descarga")
 
     # ================================================================
     # TAB 2 — COMPARE
