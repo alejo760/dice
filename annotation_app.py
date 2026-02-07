@@ -1,12 +1,12 @@
 """
-Herramienta de Anotación Ground Truth para Radiólogos - Consolidación por Neumonía
+Ground Truth Annotation Tool for Radiologists - Pneumonia Consolidation
 
-Características:
-1. Navegar imágenes de rayos X desde la carpeta Pacientes automáticamente
-2. Anotar consolidación directamente en el navegador (sin herramientas externas)
-3. Múltiples entradas de consolidación para neumonía multilobar
-4. Guardar máscara + JSON de metadatos en la misma carpeta del paciente
-5. Seguimiento de progreso, comparación inter-evaluador, zoom, tema oscuro
+Features:
+1. Browse patient X-ray images from Pacientes folder automatically
+2. Annotate consolidation directly in the browser (no external tools)
+3. Multiple consolidation entries for multilobar pneumonia
+4. Save mask + metadata JSON in the same patient folder
+5. Progress tracking, inter-rater comparison, zoom, dark theme
 """
 
 import streamlit as st
@@ -48,19 +48,19 @@ def check_credentials(username: str, password: str) -> bool:
 def login_form():
     """Display login form and handle authentication."""
     st.set_page_config(
-        page_title="Iniciar Sesión - Herramienta de Anotación",
+        page_title="Login - Annotation Tool",
         page_icon="🔐",
         layout="centered",
     )
     
-    st.title("🔐 Iniciar Sesión")
-    st.markdown("### Herramienta de Anotación de Consolidación por Neumonía")
+    st.title("🔐 Login")
+    st.markdown("### Pneumonia Consolidation Annotation Tool")
     st.markdown("---")
     
     with st.form("login_form"):
-        username = st.text_input("👤 Usuario", placeholder="Ingrese su usuario")
-        password = st.text_input("🔑 Contraseña", type="password", placeholder="Ingrese su contraseña")
-        submit = st.form_submit_button("🚀 Ingresar", use_container_width=True)
+        username = st.text_input("👤 Username", placeholder="Enter your username")
+        password = st.text_input("🔑 Password", type="password", placeholder="Enter your password")
+        submit = st.form_submit_button("🚀 Login", use_container_width=True)
         
         if submit:
             if check_credentials(username, password):
@@ -68,17 +68,17 @@ def login_form():
                 st.session_state.username = username
                 st.rerun()
             else:
-                st.error("❌ Usuario o contraseña inválidos")
+                st.error("❌ Invalid username or password")
     
     st.markdown("---")
-    st.caption("Contacte al administrador para obtener credenciales de acceso.")
+    st.caption("Contact administrator for access credentials.")
 
 
 def logout_button():
     """Display logout button in sidebar."""
     st.sidebar.markdown("---")
-    st.sidebar.markdown(f"👤 Conectado como: **{st.session_state.username}**")
-    if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True):
+    st.sidebar.markdown(f"👤 Logged in as: **{st.session_state.username}**")
+    if st.sidebar.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
         st.session_state.username = None
         st.rerun()
@@ -88,16 +88,16 @@ def logout_button():
 # ============================================================================
 
 CONSOLIDATION_COLORS = [
-    ("#00FF00", "Verde Lima"),
-    ("#FF4444", "Rojo"),
-    ("#4488FF", "Azul"),
-    ("#FFD700", "Dorado"),
-    ("#FF69B4", "Rosa"),
-    ("#00FFFF", "Cian"),
-    ("#FF8C00", "Naranja"),
-    ("#9370DB", "Púrpura"),
-    ("#32CD32", "Verde2"),
-    ("#FF1493", "Fucsia"),
+    ("#00FF00", "Lime"),
+    ("#FF4444", "Red"),
+    ("#4488FF", "Blue"),
+    ("#FFD700", "Gold"),
+    ("#FF69B4", "Pink"),
+    ("#00FFFF", "Cyan"),
+    ("#FF8C00", "Orange"),
+    ("#9370DB", "Purple"),
+    ("#32CD32", "Green2"),
+    ("#FF1493", "DeepPink"),
 ]
 
 
@@ -268,15 +268,15 @@ def main():
     annotator_name = st.sidebar.text_input("Your Name / ID", value="Radiologist1")
 
     # ── Sidebar: patients path ─────────────────────────────────────────
-    st.sidebar.header("📁 Datos del Paciente")
+    st.sidebar.header("📁 Patient Data")
     
     # Image upload for cloud deployment
-    st.sidebar.subheader("📤 Subir Radiografías")
+    st.sidebar.subheader("📤 Upload X-rays")
     uploaded_files = st.sidebar.file_uploader(
-        "Subir imágenes de rayos X de tórax",
+        "Upload chest X-ray images",
         type=["jpg", "jpeg", "png"],
         accept_multiple_files=True,
-        help="Suba imágenes JPG/PNG de rayos X para anotar",
+        help="Upload JPG/PNG chest X-ray images to annotate",
     )
     
     # Create upload directory
@@ -289,14 +289,14 @@ def main():
             file_path = upload_dir / uf.name
             with open(file_path, "wb") as f:
                 f.write(uf.getbuffer())
-        st.sidebar.success(f"✅ ¡{len(uploaded_files)} imagen(es) subida(s)!")
+        st.sidebar.success(f"✅ {len(uploaded_files)} image(s) uploaded!")
     
     st.sidebar.divider()
     
     patients_path = st.sidebar.text_input(
-        "Ruta de Carpeta de Imágenes",
+        "Images Folder Path",
         value="./uploaded_images",
-        help="Carpeta con imágenes (use el cargador de arriba para nube, o ruta local)",
+        help="Folder with images (use uploader above for cloud, or local path)",
     )
 
     # ── Load images ────────────────────────────────────────────────────
@@ -304,8 +304,8 @@ def main():
 
     if not patient_images:
         st.error(
-            f"No se encontraron imágenes JPG en **{patients_path}**. "
-            "Verifique la ruta y asegúrese de que las carpetas contengan archivos .jpg."
+            f"No JPG images found under **{patients_path}**. "
+            "Check the path and ensure folders contain .jpg files."
         )
         return
 
@@ -313,27 +313,27 @@ def main():
     annotated_count, total_count, progress_pct = get_annotation_progress(
         patient_images
     )
-    st.sidebar.header("📊 Progreso")
+    st.sidebar.header("📊 Progress")
     st.sidebar.progress(progress_pct / 100)
-    st.sidebar.metric("Anotadas", f"{annotated_count} / {total_count}")
-    st.sidebar.metric("Completado", f"{progress_pct:.1f}%")
+    st.sidebar.metric("Annotated", f"{annotated_count} / {total_count}")
+    st.sidebar.metric("Completion", f"{progress_pct:.1f}%")
 
     # ── Sidebar: filter ────────────────────────────────────────────────
-    st.sidebar.header("🔍 Filtrar")
+    st.sidebar.header("🔍 Filter")
     show_filter = st.sidebar.radio(
-        "Mostrar",
-        ["Todas las Imágenes", "Sin Anotar", "Anotadas"],
+        "Show",
+        ["All Images", "Not Annotated", "Annotated"],
         index=1,
     )
-    if show_filter == "Sin Anotar":
+    if show_filter == "Not Annotated":
         filtered_images = [i for i in patient_images if not i["annotated"]]
-    elif show_filter == "Anotadas":
+    elif show_filter == "Annotated":
         filtered_images = [i for i in patient_images if i["annotated"]]
     else:
         filtered_images = patient_images
 
     if not filtered_images:
-        st.warning(f"No hay imágenes que coincidan con el filtro **{show_filter}**.")
+        st.warning(f"No images match filter **{show_filter}**.")
         return
 
     # ── Navigation state ───────────────────────────────────────────────
@@ -344,19 +344,19 @@ def main():
     current_image = filtered_images[st.session_state.current_index]
 
     # ── Sidebar: drawing settings ──────────────────────────────────────
-    st.sidebar.header("🎨 Configuración de Dibujo")
-    stroke_width = st.sidebar.slider("Tamaño del Pincel", 1, 50, 15)
+    st.sidebar.header("🎨 Drawing Settings")
+    stroke_width = st.sidebar.slider("Brush Size", 1, 50, 15)
 
     drawing_mode = st.sidebar.selectbox(
-        "Herramienta de Dibujo",
+        "Drawing Tool",
         ["freedraw", "rect", "circle", "line"],
         index=0,
-        help="freedraw: pincel libre · rect/circle/line: formas",
+        help="freedraw: freehand brush · rect/circle/line: shapes",
     )
 
     canvas_width = st.sidebar.slider(
-        "Ancho del Lienzo (px)", 600, 1400, 900, step=50,
-        help="Ajuste para que se adapte a su pantalla. La relación de aspecto siempre se preserva.",
+        "Canvas Width (px)", 600, 1400, 900, step=50,
+        help="Adjust to fit your screen. Aspect ratio is always preserved.",
     )
 
     # ── Sidebar: zoom controls ─────────────────────────────────────────
@@ -373,21 +373,21 @@ def main():
     # Quick zoom buttons
     zb1, zb2, zb3, zb4 = st.sidebar.columns(4)
     with zb1:
-        if st.button("➖", key="zoom_out", help="Alejar",
+        if st.button("➖", key="zoom_out", help="Zoom out",
                      use_container_width=True):
             st.session_state.zoom_level = max(
                 1.0, round(st.session_state.zoom_level - 0.25, 2)
             )
             st.rerun()
     with zb2:
-        if st.button("➕", key="zoom_in", help="Acercar",
+        if st.button("➕", key="zoom_in", help="Zoom in",
                      use_container_width=True):
             st.session_state.zoom_level = min(
                 5.0, round(st.session_state.zoom_level + 0.25, 2)
             )
             st.rerun()
     with zb3:
-        if st.button("🔄", key="zoom_reset", help="Restablecer zoom",
+        if st.button("🔄", key="zoom_reset", help="Reset zoom",
                      use_container_width=True):
             st.session_state.zoom_level = 1.0
             st.session_state.zoom_pan_x = 0.5
@@ -397,8 +397,8 @@ def main():
         st.write(f"**{st.session_state.zoom_level:.1f}x**")
 
     zoom_level = st.sidebar.slider(
-        "Nivel de Zoom", 1.0, 5.0, st.session_state.zoom_level, step=0.25,
-        help="Arrastre o use los botones ➕/➖ de arriba.",
+        "Zoom Level", 1.0, 5.0, st.session_state.zoom_level, step=0.25,
+        help="Drag or use ➕/➖ buttons above.",
         key="zoom_slider",
     )
     if zoom_level != st.session_state.zoom_level:
@@ -406,7 +406,7 @@ def main():
 
     if st.session_state.zoom_level > 1.0:
         # Pan controls — arrows + sliders
-        st.sidebar.caption("**Desplazar (botones de flecha o deslizadores)**")
+        st.sidebar.caption("**Pan (arrow buttons or sliders)**")
         pa1, pa2, pa3 = st.sidebar.columns([1, 1, 1])
         pan_step = 0.08
         with pa1:
@@ -438,11 +438,11 @@ def main():
             )
 
         zoom_pan_x = st.sidebar.slider(
-            "Desplazar H", 0.0, 1.0, st.session_state.zoom_pan_x, step=0.05,
+            "Pan H", 0.0, 1.0, st.session_state.zoom_pan_x, step=0.05,
             key="pan_h_slider",
         )
         zoom_pan_y = st.sidebar.slider(
-            "Desplazar V", 0.0, 1.0, st.session_state.zoom_pan_y, step=0.05,
+            "Pan V", 0.0, 1.0, st.session_state.zoom_pan_y, step=0.05,
             key="pan_v_slider",
         )
         if zoom_pan_x != st.session_state.zoom_pan_x:
@@ -468,24 +468,24 @@ def main():
         nav1, nav2, nav3, nav4, nav5 = st.columns([1, 1, 3, 1, 1])
 
         with nav1:
-            if st.button("⬅️ Anterior", use_container_width=True):
+            if st.button("⬅️ Previous", use_container_width=True):
                 if st.session_state.current_index > 0:
                     st.session_state.current_index -= 1
                     st.rerun()
         with nav2:
-            if st.button("Siguiente ➡️", use_container_width=True):
+            if st.button("Next ➡️", use_container_width=True):
                 if st.session_state.current_index < len(filtered_images) - 1:
                     st.session_state.current_index += 1
                     st.rerun()
         with nav3:
             st.info(
-                f"Imagen **{st.session_state.current_index + 1}** de "
-                f"**{len(filtered_images)}** · Paciente "
+                f"Image **{st.session_state.current_index + 1}** of "
+                f"**{len(filtered_images)}** · Patient "
                 f"**{current_image['patient_id']}**"
             )
         with nav4:
             jump_to = st.number_input(
-                "Ir a #",
+                "Go to #",
                 min_value=1,
                 max_value=len(filtered_images),
                 value=st.session_state.current_index + 1,
@@ -496,16 +496,16 @@ def main():
                 st.rerun()
         with nav5:
             if current_image["annotated"]:
-                st.success("✅ Hecho")
+                st.success("✅ Done")
             else:
-                st.warning("⏳ Pendiente")
+                st.warning("⏳ Pending")
 
         st.divider()
 
         # Load original image (NO CLAHE)
         img_rgb = load_image_from_path(current_image["image_path"])
         if img_rgb is None:
-            st.error(f"No se puede cargar la imagen: {current_image['image_path']}")
+            st.error(f"Cannot load image: {current_image['image_path']}")
             return
 
         # Scale image to canvas_width preserving aspect ratio
@@ -538,7 +538,7 @@ def main():
         canvas_h, canvas_w = img_for_canvas.shape[:2]
 
         st.subheader(
-            f"Paciente {current_image['patient_id']} — "
+            f"Patient {current_image['patient_id']} — "
             f"{current_image['image_name']}"
         )
 
@@ -563,10 +563,10 @@ def main():
                 st.session_state.active_site = 0
 
             active_site = st.selectbox(
-                "🫁 Sitio de Consolidación Activo (elija color para dibujar)",
+                "🫁 Active Consolidation Site (pick colour to draw)",
                 list(range(n_sites)),
                 format_func=lambda i: (
-                    f"Sitio {i + 1} — {get_color_for_index(i)[1]}"
+                    f"Site {i + 1} — {get_color_for_index(i)[1]}"
                 ),
                 index=min(
                     st.session_state.active_site, n_sites - 1
@@ -589,7 +589,7 @@ def main():
                 marker = "▶" if ci == active_site else "⬤"
                 color_legend_parts.append(
                     f'<span style="color:{hex_c};font-weight:bold;">'
-                    f'{marker} Sitio {ci + 1}</span>'
+                    f'{marker} Site {ci + 1}</span>'
                 )
             st.markdown(
                 " &nbsp; ".join(color_legend_parts),
@@ -598,14 +598,14 @@ def main():
 
             if zoom_level > 1.0:
                 st.write(
-                    f"**🎨 Dibujando con color {active_label}** "
-                    f"(🔍 {zoom_level:.1f}x — Desplace ↕ para zoom, "
-                    f"use botones de flecha para desplazar)"
+                    f"**🎨 Drawing with {active_label} colour** "
+                    f"(🔍 {zoom_level:.1f}x — Scroll ↕ to zoom, "
+                    f"use arrow buttons to pan)"
                 )
             else:
                 st.write(
-                    f"**🎨 Dibujando con color {active_label}** "
-                    f"(Desplace ↕ sobre la imagen para zoom)"
+                    f"**🎨 Drawing with {active_label} colour** "
+                    f"(Scroll ↕ over image to zoom)"
                 )
 
             # ONE canvas per image — all sites draw here.
@@ -689,7 +689,7 @@ def main():
 
             # Show thumbnail with zoom rectangle when zoomed in
             if zoom_level > 1.0:
-                st.caption("📍 Vista general — el recuadro rojo muestra la región de zoom actual")
+                st.caption("📍 Overview — red box shows current zoom region")
                 thumb_w = 250
                 thumb, _ = scale_image_preserve_ratio(img_scaled, thumb_w)
                 thumb_h_actual = thumb.shape[0]
@@ -706,7 +706,7 @@ def main():
 
         # ── Metadata column ───────────────────────────────────────────
         with col_meta:
-            st.write("**📝 Metadatos de Anotación**")
+            st.write("**📝 Annotation Metadata**")
 
             # Load existing metadata if any
             existing_metadata = {}
@@ -748,8 +748,8 @@ def main():
                     st.session_state[state_key] = saved
                 else:
                     st.session_state[state_key] = [
-                        {"location": "Lóbulo Inferior Derecho",
-                         "type": "Consolidación Sólida"}
+                        {"location": "Right Lower Lobe",
+                         "type": "Solid Consolidation"}
                     ]
 
             consolidations = st.session_state[state_key]
@@ -758,12 +758,12 @@ def main():
             for idx, entry in enumerate(consolidations):
                 site_hex, site_label = get_color_for_index(idx)
                 with st.expander(
-                    f"⬤ Sitio {idx + 1}: {entry['location']}  "
+                    f"⬤ Site {idx + 1}: {entry['location']}  "
                     f"({site_label})",
                     expanded=True,
                 ):
                     loc = st.selectbox(
-                        "Ubicación",
+                        "Location",
                         location_options,
                         index=(
                             location_options.index(entry["location"])
@@ -773,7 +773,7 @@ def main():
                         key=f"loc_{state_key}_{idx}",
                     )
                     ctype = st.selectbox(
-                        "Tipo",
+                        "Type",
                         type_options,
                         index=(
                             type_options.index(entry["type"])
@@ -786,17 +786,17 @@ def main():
 
                     if len(consolidations) > 1:
                         if st.button(
-                            "🗑️ Eliminar", key=f"rm_{state_key}_{idx}",
+                            "🗑️ Remove", key=f"rm_{state_key}_{idx}",
                             use_container_width=True,
                         ):
                             consolidations.pop(idx)
                             st.rerun()
 
-            if st.button("➕ Agregar Otro Sitio de Consolidación",
+            if st.button("➕ Add Another Consolidation Site",
                          use_container_width=True):
                 consolidations.append(
-                    {"location": "Lóbulo Inferior Izquierdo",
-                     "type": "Consolidación Sólida"}
+                    {"location": "Left Lower Lobe",
+                     "type": "Solid Consolidation"}
                 )
                 # Auto-switch to the new site so the next strokes
                 # use the new colour immediately
@@ -809,22 +809,22 @@ def main():
             involved_lobes = list({c["location"] for c in consolidations})
             if len(involved_lobes) >= 2:
                 st.info(
-                    f"🔴 Neumonía **Multilobar** — "
-                    f"{len(involved_lobes)} lóbulos afectados"
+                    f"🔴 **Multilobar** pneumonia — "
+                    f"{len(involved_lobes)} lobes involved"
                 )
             else:
                 st.info(f"🟡 **Unilobar** — {involved_lobes[0]}")
 
             confidence = st.slider(
-                "Confianza",
+                "Confidence",
                 min_value=1,
                 max_value=5,
                 value=existing_metadata.get("confidence", 5),
             )
             notes = st.text_area(
-                "Notas Clínicas",
+                "Clinical Notes",
                 value=existing_metadata.get("clinical_notes", ""),
-                placeholder="Ej., Signo de silueta presente, afectación bilateral",
+                placeholder="E.g., Silhouette sign present, bilateral involvement",
             )
 
             # Drawn area stats
@@ -834,10 +834,10 @@ def main():
                 total_px = alpha.shape[0] * alpha.shape[1]
                 if drawn_px > 0:
                     st.metric(
-                        "Área Dibujada",
+                        "Drawn Area",
                         f"{(drawn_px / total_px) * 100:.2f}%",
                     )
-                    st.metric("Píxeles", f"{drawn_px:,}")
+                    st.metric("Pixels", f"{drawn_px:,}")
 
             st.divider()
 
@@ -855,7 +855,7 @@ def main():
 
             with b1:
                 if st.button(
-                    "💾 Guardar y Siguiente", type="primary",
+                    "💾 Save & Next", type="primary",
                     use_container_width=True,
                 ):
                     if (
@@ -870,7 +870,7 @@ def main():
                             _build_metadata(),
                             img_rgb.shape,
                         )
-                        st.success("✅ ¡Guardado!")
+                        st.success("✅ Saved!")
                         if (
                             st.session_state.current_index
                             < len(filtered_images) - 1
@@ -878,10 +878,10 @@ def main():
                             st.session_state.current_index += 1
                         st.rerun()
                     else:
-                        st.error("¡Por favor dibuje una anotación primero!")
+                        st.error("Please draw an annotation first!")
 
             with b2:
-                if st.button("💾 Solo Guardar", use_container_width=True):
+                if st.button("💾 Save Only", use_container_width=True):
                     if (
                         canvas_result.image_data is not None
                         and np.sum(canvas_result.image_data[:, :, 3] > 0) > 0
@@ -894,23 +894,23 @@ def main():
                             _build_metadata(),
                             img_rgb.shape,
                         )
-                        st.success("✅ ¡Guardado!")
+                        st.success("✅ Saved!")
                     else:
-                        st.error("¡Por favor dibuje una anotación primero!")
+                        st.error("Please draw an annotation first!")
 
             if current_image["annotated"]:
-                if st.button("🗑️ Eliminar Anotación",
+                if st.button("🗑️ Delete Annotation",
                              use_container_width=True):
                     if current_image["mask_path"].exists():
                         current_image["mask_path"].unlink()
                     if current_image["metadata_path"].exists():
                         current_image["metadata_path"].unlink()
-                    st.success("¡Anotación eliminada!")
+                    st.success("Annotation deleted!")
                     st.rerun()
 
             # ── Download Buttons ───────────────────────────────────────
             st.divider()
-            st.write("**📥 Descargar Anotación**")
+            st.write("**📥 Download Annotation**")
             
             # Generate file ID from patient_id and image name
             file_id = f"{current_image['patient_id']}_{current_image['image_path'].stem}"
@@ -955,7 +955,7 @@ def main():
                 dl1, dl2 = st.columns(2)
                 with dl1:
                     st.download_button(
-                        label="📥 Descargar Máscara (PNG)",
+                        label="📥 Download Mask (PNG)",
                         data=mask_bytes,
                         file_name=f"{file_id}_mask.png",
                         mime="image/png",
@@ -963,14 +963,14 @@ def main():
                     )
                 with dl2:
                     st.download_button(
-                        label="📥 Descargar JSON",
+                        label="📥 Download JSON",
                         data=json_bytes,
                         file_name=f"{file_id}_annotation.json",
                         mime="application/json",
                         use_container_width=True,
                     )
                 
-                st.caption(f"Los archivos se llamarán: `{file_id}_mask.png` y `{file_id}_annotation.json`")
+                st.caption(f"Files will be named: `{file_id}_mask.png` and `{file_id}_annotation.json`")
             
             elif current_image["annotated"] and current_image["mask_path"].exists():
                 # Load existing saved annotation for download
@@ -992,7 +992,7 @@ def main():
                     dl1, dl2 = st.columns(2)
                     with dl1:
                         st.download_button(
-                            label="📥 Descargar Máscara Guardada",
+                            label="📥 Download Saved Mask",
                             data=mask_bytes,
                             file_name=f"{file_id}_mask.png",
                             mime="image/png",
@@ -1000,35 +1000,35 @@ def main():
                         )
                     with dl2:
                         st.download_button(
-                            label="📥 Descargar JSON Guardado",
+                            label="📥 Download Saved JSON",
                             data=json_bytes,
                             file_name=f"{file_id}_annotation.json",
                             mime="application/json",
                             use_container_width=True,
                         )
-                    st.caption(f"Archivos: `{file_id}_mask.png` / `{file_id}_annotation.json`")
+                    st.caption(f"Files: `{file_id}_mask.png` / `{file_id}_annotation.json`")
             else:
-                st.info("Dibuje una anotación para habilitar las descargas")
+                st.info("Draw an annotation to enable downloads")
 
     # ================================================================
     # TAB 2 — COMPARE
     # ================================================================
     with tab2:
-        st.header("Comparar Anotaciones Entre Radiólogos")
+        st.header("Compare Annotations Between Radiologists")
 
         cmp1, cmp2 = st.columns(2)
         with cmp1:
-            st.subheader("Radiólogo 1")
+            st.subheader("Radiologist 1")
             mask1_file = st.file_uploader(
-                "Subir Máscara 1", type=["png"], key="comp1"
+                "Upload Mask 1", type=["png"], key="comp1"
             )
-            name1 = st.text_input("Nombre", value="Radiólogo 1", key="name1")
+            name1 = st.text_input("Name", value="Radiologist 1", key="name1")
         with cmp2:
-            st.subheader("Radiólogo 2")
+            st.subheader("Radiologist 2")
             mask2_file = st.file_uploader(
-                "Subir Máscara 2", type=["png"], key="comp2"
+                "Upload Mask 2", type=["png"], key="comp2"
             )
-            name2 = st.text_input("Nombre", value="Radiólogo 2", key="name2")
+            name2 = st.text_input("Name", value="Radiologist 2", key="name2")
 
         if mask1_file and mask2_file:
             mask1 = cv2.imdecode(
@@ -1049,23 +1049,23 @@ def main():
             iou = calculate_iou(mask1, mask2)
             precision, recall = calculate_precision_recall(mask1, mask2)
 
-            st.subheader("📊 Concordancia Inter-Evaluador")
+            st.subheader("📊 Inter-Rater Agreement")
             m1, m2, m3, m4 = st.columns(4)
             m1.metric("Dice", f"{dice:.4f}")
             m2.metric("IoU", f"{iou:.4f}")
-            m3.metric("Precisión", f"{precision:.4f}")
-            m4.metric("Sensibilidad", f"{recall:.4f}")
+            m3.metric("Precision", f"{precision:.4f}")
+            m4.metric("Recall", f"{recall:.4f}")
 
             if dice >= 0.80:
-                st.success("✅ Concordancia Excelente")
+                st.success("✅ Excellent Agreement")
             elif dice >= 0.70:
-                st.info("ℹ️ Buena Concordancia")
+                st.info("ℹ️ Good Agreement")
             elif dice >= 0.50:
-                st.warning("⚠️ Concordancia Regular — Se recomienda revisión")
+                st.warning("⚠️ Fair Agreement — Review recommended")
             else:
-                st.error("❌ Concordancia Deficiente — Se necesita consenso")
+                st.error("❌ Poor Agreement — Consensus needed")
 
-            st.subheader("Comparación Visual")
+            st.subheader("Visual Comparison")
             overlay = np.zeros(
                 (mask1.shape[0], mask1.shape[1], 3), dtype=np.uint8
             )
@@ -1076,7 +1076,7 @@ def main():
             st.image(
                 overlay,
                 caption=(
-                    f"Verde: {name1} | Rojo: {name2} | Amarillo: Concordancia"
+                    f"Green: {name1} | Red: {name2} | Yellow: Agreement"
                 ),
                 use_column_width=True,
             )
@@ -1085,62 +1085,62 @@ def main():
     # TAB 3 — GUIDELINES
     # ================================================================
     with tab3:
-        st.header("📖 Guía de Anotación")
+        st.header("📖 Annotation Guidelines")
         st.markdown(
             """
-### Qué Anotar
+### What to Annotate
 
-La **consolidación por neumonía** aparece como áreas blancas/opacas donde los
-espacios aéreos están llenos de líquido.
+**Pneumonia consolidation** appears as white / opaque areas where air
+spaces are filled with fluid.
 
-### Neumonía Multilobar
+### Multilobar Pneumonia
 
-Cuando la consolidación está presente en **más de un lóbulo**, agregue una
-entrada de consolidación separada para cada sitio afectado usando el botón
-**"➕ Agregar Otro Sitio de Consolidación"**. Esto nos permite rastrear la
-afectación multilobar con precisión.
+When consolidation is present in **more than one lobe**, add a separate
+consolidation entry for each affected site using the **"➕ Add Another
+Consolidation Site"** button. This lets us track multilobar involvement
+accurately.
 
-### Signos Radiológicos Clave
+### Key Radiologic Signs
 
-#### ✅ Incluir en Su Máscara
-1. **Broncograma Aéreo** — Tubos ramificados oscuros dentro de la consolidación
-2. **Signo de la Silueta** — Borde del corazón/diafragma perdido en la consolidación
-3. **Consolidación Sólida** — Áreas opacas blancas densas
-4. **Opacidad en Vidrio Esmerilado** — Áreas difusas sutiles en los bordes
+#### ✅ Include in Your Mask
+1. **Air Bronchograms** — Dark branching tubes inside consolidation
+2. **Silhouette Sign** — Heart / diaphragm border lost in consolidation
+3. **Solid Consolidation** — Dense white opaque areas
+4. **Ground Glass Opacity** — Subtle hazy areas at edges
 
-#### ❌ Excluir de Su Máscara
-1. **Costillas** — Trace "a través de" las sombras costales
-2. **Tejido pulmonar normal** — No sobre-segmente
-3. **Derrame pleural** (a menos que se solicite) — Signo del menisco suave
+#### ❌ Exclude from Your Mask
+1. **Ribs** — Trace "through" rib shadows
+2. **Normal lung tissue** — Don't over-segment
+3. **Pleural effusion** (unless asked) — Smooth meniscus sign
 
-### Herramientas de Dibujo
-| Herramienta | Uso |
+### Drawing Tools
+| Tool | Use for |
 |---|---|
-| **freedraw** | Trazado a mano libre de los bordes de consolidación |
-| **rect** | ROI rectangular rápido |
-| **circle** | Regiones circulares/ovaladas |
-| **line** | Trazado de bordes rectos |
+| **freedraw** | Freehand tracing of consolidation borders |
+| **rect** | Quick rectangular ROI |
+| **circle** | Circular / oval regions |
+| **line** | Straight edge tracing |
 
-### Colores
-Cada sitio de consolidación tiene asignado automáticamente un **color único**
-(Verde Lima, Rojo, Azul, Dorado, …). Seleccione el sitio activo antes de dibujar
-para que las anotaciones sean visualmente distinguibles.
+### Colors
+Each consolidation site is automatically assigned a **unique colour**
+(Lime, Red, Blue, Gold, …). Select the active site before drawing
+so annotations are visually distinguishable.
 
-### Consejos
-1. **Dibuje directamente** en el lienzo — no necesita herramientas externas
-2. **Ajuste el tamaño del pincel** con el deslizador de la barra lateral
-3. **Zoom**: desplace ↕ la rueda del ratón sobre la imagen, o use los
-   botones ➕/➖ en la barra lateral
-4. **Desplazar**: cuando tenga zoom, use los botones de flecha (⬅️➡️⬆️⬇️) o
-   deslizadores para navegar
-5. **Sea consistente** — mismos criterios para cada imagen
+### Tips
+1. **Draw directly** on the canvas — no external tools needed
+2. **Adjust brush size** with the sidebar slider
+3. **Zoom**: scroll ↕ your mouse wheel over the image, or use the
+   ➕ / ➖ buttons in the sidebar
+4. **Pan**: when zoomed in, use the arrow buttons (⬅️➡️⬆️⬇️) or
+   sliders to navigate
+5. **Be consistent** — same criteria for every image
 
-### Métricas de Calidad
-| Puntaje Dice | Interpretación |
+### Quality Metrics
+| Dice Score | Interpretation |
 |---|---|
-| > 0.80 | ✅ Concordancia excelente |
-| 0.70 – 0.80 | Buena concordancia |
-| < 0.70 | ⚠️ Necesita revisión / consenso |
+| > 0.80 | ✅ Excellent agreement |
+| 0.70 – 0.80 | Good agreement |
+| < 0.70 | ⚠️ Needs review / consensus |
 """
         )
 
