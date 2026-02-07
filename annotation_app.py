@@ -146,11 +146,24 @@ def calculate_precision_recall(ground_truth, prediction):
 # ============================================================================
 
 def load_image_from_path(image_path):
-    """Load image as RGB numpy array (original, no CLAHE)."""
-    img = cv2.imread(str(image_path))
-    if img is None:
-        return None
-    return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    """Load image as RGB numpy array (original, no CLAHE).
+    
+    Uses PIL for better cloud compatibility (cv2.imread can fail on
+    Streamlit Cloud with certain paths or file encodings).
+    """
+    try:
+        # Use PIL for reliable loading on cloud environments
+        pil_img = Image.open(str(image_path))
+        # Convert to RGB if necessary (handles grayscale, RGBA, etc.)
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        return np.array(pil_img)
+    except Exception as e:
+        # Fallback to OpenCV if PIL fails
+        img = cv2.imread(str(image_path))
+        if img is None:
+            return None
+        return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
 def scale_image_preserve_ratio(img, target_width=900):
@@ -289,6 +302,10 @@ def main():
             file_path = upload_dir / uf.name
             with open(file_path, "wb") as f:
                 f.write(uf.getbuffer())
+                f.flush()  # Ensure data is written to disk
+        # Force a small delay to ensure filesystem sync on cloud
+        import time
+        time.sleep(0.1)
         st.sidebar.success(f"✅ {len(uploaded_files)} image(s) uploaded!")
     
     st.sidebar.divider()
@@ -505,7 +522,11 @@ def main():
         # Load original image (NO CLAHE)
         img_rgb = load_image_from_path(current_image["image_path"])
         if img_rgb is None:
-            st.error(f"Cannot load image: {current_image['image_path']}")
+            st.error(f"❌ Cannot load image: {current_image['image_path']}")
+            # Debug info for cloud troubleshooting
+            img_path = Path(current_image["image_path"])
+            st.warning(f"🔍 Debug: File exists={img_path.exists()}, "
+                      f"Size={img_path.stat().st_size if img_path.exists() else 'N/A'} bytes")
             return
 
         # Scale image to canvas_width preserving aspect ratio
