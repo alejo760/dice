@@ -9,6 +9,7 @@ Features:
 5. Progress tracking, inter-rater comparison, zoom, dark theme
 """
 
+import sys
 import streamlit as st
 import cv2
 import numpy as np
@@ -539,7 +540,20 @@ def main():
         img_rgb = load_image_from_path(current_image["image_path"])
         if img_rgb is None:
             st.error(f"Cannot load image: {current_image['image_path']}")
+            # Debug info for cloud troubleshooting
+            with st.expander("🔧 Debug Info"):
+                st.write(f"**Path:** `{current_image['image_path']}`")
+                st.write(f"**Exists:** {Path(current_image['image_path']).exists()}")
+                if Path(current_image['image_path']).exists():
+                    st.write(f"**Size:** {Path(current_image['image_path']).stat().st_size} bytes")
+                st.write(f"**Python:** {sys.version}")
+                st.write(f"**OpenCV:** {cv2.__version__}")
+                import PIL
+                st.write(f"**Pillow:** {PIL.__version__}")
             return
+
+        # Debug: Show image info (can be removed in production)
+        # st.caption(f"Image loaded: {img_rgb.shape}, dtype={img_rgb.dtype}")
 
         # Scale image to canvas_width preserving aspect ratio
         img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
@@ -569,6 +583,17 @@ def main():
             )
 
         canvas_h, canvas_w = img_for_canvas.shape[:2]
+
+        # Ensure image is in correct format for PIL/canvas (uint8 RGB)
+        if img_for_canvas.dtype != np.uint8:
+            img_for_canvas = img_for_canvas.astype(np.uint8)
+        if len(img_for_canvas.shape) == 2:  # Grayscale
+            img_for_canvas = cv2.cvtColor(img_for_canvas, cv2.COLOR_GRAY2RGB)
+        elif img_for_canvas.shape[2] == 4:  # RGBA
+            img_for_canvas = cv2.cvtColor(img_for_canvas, cv2.COLOR_RGBA2RGB)
+        
+        # Create PIL Image for canvas background
+        pil_background = Image.fromarray(img_for_canvas, mode='RGB')
 
         st.subheader(
             f"Patient {current_image['patient_id']} — "
@@ -648,7 +673,7 @@ def main():
                 fill_color=fill_rgba,
                 stroke_width=stroke_width,
                 stroke_color=active_hex,
-                background_image=Image.fromarray(img_for_canvas),
+                background_image=pil_background,
                 background_color="#000000",
                 update_streamlit=True,
                 height=canvas_h,
