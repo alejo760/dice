@@ -458,8 +458,14 @@ def main():
     img_scaled, scale_ratio = scale_image_preserve_ratio(img_rgb, canvas_width)
     canvas_h, canvas_w = img_scaled.shape[:2]
     
-    # Convert to PIL for canvas
+    # Convert to PIL for display
     pil_image = Image.fromarray(img_scaled.astype(np.uint8))
+    
+    # Convert to base64 for HTML display
+    import base64
+    buffered = io.BytesIO()
+    pil_image.save(buffered, format="PNG")
+    img_base64 = base64.b64encode(buffered.getvalue()).decode()
 
     st.subheader(
         f"Paciente {current_image['patient_id']} — "
@@ -468,7 +474,7 @@ def main():
 
     col_canvas, col_meta = st.columns([3, 1])
 
-    # ── Canvas with image background ───────────────────────────────
+    # ── Canvas overlaid on image ───────────────────────────────────
     with col_canvas:
         # How many consolidation sites exist?
         state_key_preview = (
@@ -519,12 +525,41 @@ def main():
 
         st.write(f"**🎨 Dibujando con color {active_label}** - Dibuje directamente sobre la imagen")
 
-        # Canvas with PIL image as background
+        # Create container with image background and transparent canvas overlay
+        st.markdown(
+            f"""
+            <style>
+            .canvas-container {{
+                position: relative;
+                width: {canvas_w}px;
+                height: {canvas_h}px;
+            }}
+            .canvas-container img {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 1;
+            }}
+            .canvas-container > div {{
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 2;
+            }}
+            </style>
+            <div class="canvas-container">
+                <img src="data:image/png;base64,{img_base64}" width="{canvas_w}" height="{canvas_h}">
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        
+        # Transparent canvas for drawing
         canvas_result = st_canvas(
             fill_color=fill_rgba,
             stroke_width=stroke_width,
             stroke_color=active_hex,
-            background_image=pil_image,
+            background_color="rgba(0,0,0,0)",
             update_streamlit=True,
             height=canvas_h,
             width=canvas_w,
