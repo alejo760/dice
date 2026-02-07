@@ -1,3 +1,15 @@
+---
+title: Pneumonia Consolidation Annotation Tool
+emoji: 🫁
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.29.0"
+python_version: "3.11"
+app_file: annotation_app.py
+pinned: false
+---
+
 # Pneumonia Consolidation Segmentation Tools 🫁
 
 A comprehensive toolkit for segmenting pneumonia consolidation in chest X-rays using machine learning, with tools for preprocessing, annotation, and validation using Dice coefficient metrics.
